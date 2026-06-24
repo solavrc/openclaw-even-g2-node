@@ -1,0 +1,10 @@
+node_modules/
+dist/
+*.ehpk
+output/
+release/
+.playwright-cli/
+.DS_Store
+*.log
+*-state.json
+*-attachments/
