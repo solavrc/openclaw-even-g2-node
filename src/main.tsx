@@ -1166,7 +1166,7 @@ export function App() {
   }
 
   function applySimulatorModeState(fixtureMode: SimulatorFixtureMode, bridge: EvenAppBridge) {
-    const plan = simulatorFixtureViewPlan(fixtureMode);
+    const plan = simulatorFixtureViewPlan(fixtureMode, window.location.search);
     switch (plan.action) {
       case "store-voice":
         pendingSessionVoiceRef.current = plan.pendingSessionVoice;
@@ -1194,6 +1194,15 @@ export function App() {
         setActiveGlassView("canvas");
         setActiveCanvasText(plan.text);
         void renderGlass(plan.text, bridge);
+        return true;
+      case "emoji-probe":
+        setActiveGlassView("canvas");
+        setActiveCanvasText(plan.text);
+        void renderGlassTextFrame(bridge, {
+          header: "Emoji glyph probe",
+          body: plan.text,
+          hint: "raw glyph probe",
+        }, { normalize: false });
         return true;
       case "canvas-tutorial":
         renderCanvasTutorial({ force: true, bridge });

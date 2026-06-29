@@ -9,6 +9,7 @@ import {
   TextContainerUpgrade,
 } from "@evenrealities/even_hub_sdk";
 import { normalizeGlassHudFrame, shortText } from "./glass";
+import { cleanGlassText } from "./glass-text";
 import type { GlassHudFrame, GlassHudFrameInput } from "./glass";
 
 export const GLASS_CANVAS_WIDTH = 576;
@@ -62,11 +63,7 @@ function devLog(...args: unknown[]) {
 }
 
 export function displayTextForGlass(text: string) {
-  return text
-    .replace(/`/g, "'")
-    .replace(/[ \t]+/g, " ")
-    .replace(/\n{3,}/g, "\n\n")
-    .trim();
+  return cleanGlassText(text);
 }
 
 function parseLegacyGlassTextFrame(text: string): GlassHudFrame {
@@ -88,6 +85,15 @@ function rightAlignHeaderHint(hint: string) {
   if (!clean) return "";
   const targetChars = 30;
   return `${" ".repeat(Math.max(0, targetChars - clean.length))}${clean}`;
+}
+
+function normalizedVoicePanelFrame(frame: GlassVoicePanelFrame): GlassVoicePanelFrame {
+  return {
+    base: normalizeGlassHudFrame(frame.base),
+    title: cleanGlassText(frame.title),
+    body: cleanGlassText(frame.body),
+    hint: cleanGlassText(frame.hint),
+  };
 }
 
 function glassFrameTextObject(frame: GlassHudFrame) {
@@ -267,10 +273,14 @@ function voicePanelCacheEntries(frame: GlassVoicePanelFrame) {
   ];
 }
 
-export async function renderGlassTextFrame(bridge: GlassTextBridge | null, frameInput: GlassHudFrame): Promise<boolean> {
+export async function renderGlassTextFrame(
+  bridge: GlassTextBridge | null,
+  frameInput: GlassHudFrame,
+  options: { normalize?: boolean } = {},
+): Promise<boolean> {
   if (!bridge) return false;
   const bridgeWithState = bridge as StatefulTextBridge;
-  const frame = normalizeGlassHudFrame(frameInput);
+  const frame = options.normalize === false ? frameInput : normalizeGlassHudFrame(frameInput);
   const layout: GlassLayoutName = "text-frame";
   const cacheEntries = textFrameCacheEntries(frame);
   const page = {
@@ -368,9 +378,10 @@ export async function renderGlassImageCanvas(bridge: GlassImageBridge | null, ti
   return updates.every((result) => ImageRawDataUpdateResult.isSuccess(result));
 }
 
-export async function renderGlassVoicePanelFrame(bridge: GlassTextBridge | null, frame: GlassVoicePanelFrame): Promise<boolean> {
+export async function renderGlassVoicePanelFrame(bridge: GlassTextBridge | null, frameInput: GlassVoicePanelFrame): Promise<boolean> {
   if (!bridge) return false;
   const bridgeWithState = bridge as StatefulTextBridge;
+  const frame = normalizedVoicePanelFrame(frameInput);
   const layout: GlassLayoutName = "voice-panel";
   const cacheEntries = voicePanelCacheEntries(frame);
   const page = {

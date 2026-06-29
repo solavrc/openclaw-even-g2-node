@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   APPROVAL_FIXTURE,
   CANVAS_FIXTURE_TEXT,
+  EMOJI_PROBE_DEFAULT_TEXT,
   RECOVERY_FIXTURE_FRAME,
   SIMULATOR_FIXTURE_SESSIONS,
   SIMULATOR_FIXTURE_SESSION_KEY,
@@ -11,6 +12,7 @@ import {
   VOICE_REVIEW_FIXTURE_DRAFT,
   isSimulatorFixtureMode,
   simulatorFixtureBaseState,
+  simulatorEmojiProbeTextFromSearch,
   simulatorFixtureTranscript,
   simulatorFixtureViewPlan,
   simulatorNodeSnapshot,
@@ -29,12 +31,14 @@ describe("simulator fixtures", () => {
   it("accepts documented fixture modes only", () => {
     expect(isSimulatorFixtureMode("session")).toBe(true);
     expect(isSimulatorFixtureMode("voiceReview")).toBe(true);
+    expect(isSimulatorFixtureMode("emojiProbe")).toBe(true);
     expect(isSimulatorFixtureMode("storeVoice")).toBe(true);
     expect(isSimulatorFixtureMode("unknown")).toBe(false);
   });
 
   it("enables simFixture only in development mode", () => {
     expect(simulatorFixtureModeFromSearch("?simFixture=canvas", true)).toBe("canvas");
+    expect(simulatorFixtureModeFromSearch("?simFixture=emojiProbe", true)).toBe("emojiProbe");
     expect(simulatorFixtureModeFromSearch("?simFixture=canvas", false)).toBe("");
     expect(simulatorFixtureModeFromSearch("?simFixture=unknown", true)).toBe("");
   });
@@ -57,6 +61,7 @@ describe("simulator fixtures", () => {
     expect(STORE_VOICE_LISTENING_TEXT).toContain("Summarize this thread");
     expect(VOICE_REVIEW_FIXTURE_DRAFT.targetSessionKey).toBe(SIMULATOR_FIXTURE_SESSION_KEY);
     expect(CANVAS_FIXTURE_TEXT).toContain("Deploy finished");
+    expect(EMOJI_PROBE_DEFAULT_TEXT).toContain("Emoji probe");
     expect(APPROVAL_FIXTURE.command).toBe("make release");
     expect(RECOVERY_FIXTURE_FRAME.header).toContain("NODE UNAVAILABLE");
   });
@@ -76,6 +81,12 @@ describe("simulator fixtures", () => {
     expect(simulatorFixtureViewPlan("canvas")).toEqual({
       action: "canvas",
       text: CANVAS_FIXTURE_TEXT,
+    });
+    expect(simulatorEmojiProbeTextFromSearch("?emojiText=%E2%98%80%EF%B8%8F")).toBe("☀️");
+    expect(simulatorEmojiProbeTextFromSearch("")).toBe(EMOJI_PROBE_DEFAULT_TEXT);
+    expect(simulatorFixtureViewPlan("emojiProbe", "?emojiText=%E2%98%80%EF%B8%8F")).toEqual({
+      action: "emoji-probe",
+      text: "☀️",
     });
     expect(simulatorFixtureViewPlan("canvasTutorial")).toEqual({ action: "canvas-tutorial" });
     expect(simulatorFixtureViewPlan("approval")).toEqual({
