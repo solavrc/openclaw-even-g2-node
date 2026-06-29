@@ -5,6 +5,7 @@ import {
   parseDevicePreview,
   parseNodePendingList,
   parseNodeStatusPending,
+  isEvenG2Request,
 } from "./approve-even-g2-pairing.ts";
 
 describe("approve Even G2 pairing helpers", () => {
@@ -78,6 +79,28 @@ describe("approve Even G2 pairing helpers", () => {
         source: "devices-list",
       }),
     ]);
+  });
+
+  it("requires a concrete Even G2 signal beyond the generic glasses family", () => {
+    expect(isEvenG2Request({
+      kind: "device",
+      requestId: "request-1",
+      deviceFamily: "glasses",
+      source: "devices-list",
+    })).toBe(false);
+    expect(isEvenG2Request({
+      kind: "device",
+      requestId: "request-2",
+      deviceFamily: "glasses",
+      displayName: "Even G2",
+      source: "devices-list",
+    })).toBe(true);
+    expect(isEvenG2Request({
+      kind: "node",
+      requestId: "request-3",
+      clientId: "openclaw-even-g2-node",
+      source: "nodes-pending",
+    })).toBe(true);
   });
 
   it("parses node pending requests with declared capabilities", () => {

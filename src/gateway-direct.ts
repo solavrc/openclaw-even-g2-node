@@ -1550,6 +1550,16 @@ export class GatewayDirectVoiceTransport extends EventTarget {
         this.close();
         return;
       }
+      if (!this.options.config.targetSessionKey) {
+        this.emit({
+          type: "transcript.final",
+          text,
+          sessionKey,
+          idempotencyKey,
+        });
+        this.close();
+        return;
+      }
       this.emit({
         type: "voice.draft.ready",
         text,

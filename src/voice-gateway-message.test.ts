@@ -268,6 +268,23 @@ describe("voice gateway message helpers", () => {
     expect(createId).toHaveBeenCalledTimes(1);
   });
 
+  it("builds Talk relay voice start config for node transcription commands", () => {
+    const createId = vi.fn(() => "node-voice-id");
+
+    expect(bridgeVoiceStartConfig({
+      transcriptionOnly: true,
+      activeSessionKey: "active-session",
+      createIdempotencyKey: createId,
+    })).toMatchObject({
+      transcriptionMode: "talk-relay",
+      sessionKey: "active-session",
+      targetSessionKey: undefined,
+      draftTimeoutMs: 8000,
+      idempotencyKey: "node-voice-id",
+    });
+    expect(createId).toHaveBeenCalledTimes(1);
+  });
+
   it("builds pending session voice state for a session voice start", () => {
     expect(sessionVoiceModeFromSetting("off")).toBe("review");
     expect(sessionVoiceModeFromSetting("direct")).toBe("direct");

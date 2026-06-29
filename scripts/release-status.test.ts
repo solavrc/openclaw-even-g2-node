@@ -9,6 +9,7 @@ import {
   currentPackedBundleWarning,
   releaseBundleGitWarning,
   releaseCandidateCommitCount,
+  simulatorRelevantChangedFilesSinceReport,
   releaseStatusSummary,
   simulatorFixturesErrorSummary,
   simulatorFixturesGitWarning,
@@ -36,6 +37,7 @@ function runGit(dir: string, args: string[]) {
   if (result.status !== 0) {
     throw new Error(`git ${args.join(" ")} failed: ${result.stderr}`);
   }
+  return result.stdout.trim();
 }
 
 function tinyPng(width: number, height: number) {
@@ -250,6 +252,31 @@ describe("release status simulator fixture report", () => {
       currentStatusPorcelain: "",
       simulatorRelevantChangedFilesSinceReport: null,
     })).toContain("uncommitted changes");
+  });
+
+  it("filters simulator-relevant changed files since a fixture report", () => {
+    const dir = tempDir();
+    runGit(dir, ["init", "--initial-branch=main"]);
+    runGit(dir, ["config", "user.name", "Test"]);
+    runGit(dir, ["config", "user.email", "test@example.invalid"]);
+    fs.mkdirSync(path.join(dir, "src"), { recursive: true });
+    fs.writeFileSync(path.join(dir, "src", "main.tsx"), "one\n");
+    fs.writeFileSync(path.join(dir, "docs.md"), "one\n");
+    runGit(dir, ["add", "."]);
+    runGit(dir, ["commit", "-m", "base"]);
+    const reportHead = runGit(dir, ["rev-parse", "HEAD"]);
+    fs.writeFileSync(path.join(dir, "src", "main.tsx"), "two\n");
+    fs.writeFileSync(path.join(dir, "docs.md"), "two\n");
+    runGit(dir, ["add", "."]);
+    runGit(dir, ["commit", "-m", "change simulator source"]);
+    const currentHead = runGit(dir, ["rev-parse", "HEAD"]);
+
+    expect(simulatorRelevantChangedFilesSinceReport({
+      git: { head: reportHead },
+    }, currentHead, dir)).toEqual(["src/main.tsx"]);
+    expect(simulatorRelevantChangedFilesSinceReport({
+      git: { head: currentHead },
+    }, currentHead, dir)).toBeNull();
   });
 });
 

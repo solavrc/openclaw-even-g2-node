@@ -313,13 +313,14 @@ export function reviewVoiceFailureFromPendingSession(error: string, pendingSessi
 
 export function bridgeVoiceStartConfig(input: {
   pendingSessionVoice?: PendingSessionVoice | null;
+  transcriptionOnly?: boolean;
   activeSessionKey: string;
   createIdempotencyKey: () => string;
 }): BridgeVoiceStartConfig {
   const pending = input.pendingSessionVoice;
   return {
     format: EVEN_G2_MICROPHONE_FORMAT,
-    transcriptionMode: pending?.mode === "review" ? "talk-relay" : "attachment",
+    transcriptionMode: pending?.mode === "review" || input.transcriptionOnly ? "talk-relay" : "attachment",
     ...(pending?.transcriptionProvider ? { transcriptionProvider: pending.transcriptionProvider } : {}),
     sessionKey: pending?.targetSessionKey || input.activeSessionKey,
     targetSessionKey: pending?.targetSessionKey,

@@ -2643,15 +2643,16 @@ export function App() {
   async function handleVoiceTransportOpened(
     voiceWs: VoiceTransport,
     config: Record<string, unknown>,
-    onOpen: (voiceWs: VoiceTransport) => Promise<void> | void,
+    onOpen: (voiceWs: VoiceTransport) => Promise<boolean> | boolean,
   ) {
     try {
       sendGatewayOutboxRequest(voiceWs, gatewayUtteranceStartRequest(config, createRequestId()));
-      await onOpen(voiceWs);
+      return await onOpen(voiceWs);
     } catch (err) {
       const errorText = err instanceof Error ? err.message : String(err);
       failPendingVoiceOpen(errorText);
       closeVoiceTransportWithoutFinalize();
+      return false;
     }
   }
 
@@ -2662,7 +2663,7 @@ export function App() {
 
   async function openVoiceWebSocket(
     config: Record<string, unknown>,
-    onOpen: (voiceWs: VoiceTransport) => Promise<void> | void,
+    onOpen: (voiceWs: VoiceTransport) => Promise<boolean> | boolean,
   ) {
     if (!(wsRef.current instanceof GatewayDirectTransport)) {
       throw new Error("OpenClaw Gateway is not connected");
@@ -2671,25 +2672,43 @@ export function App() {
     const voiceGeneration = nextVoiceTransportGeneration(voiceTransportGenerationRef.current);
     voiceTransportGenerationRef.current = voiceGeneration;
     const isCurrentVoiceTransport = () => isCurrentVoiceTransportGeneration(voiceTransportGenerationRef.current, voiceGeneration);
+    let settleOpen: (opened: boolean) => void = () => {};
+    let openSettled = false;
+    const openHandled = new Promise<boolean>((resolve) => {
+      settleOpen = (opened) => {
+        if (openSettled) return;
+        openSettled = true;
+        resolve(opened);
+      };
+    });
     voiceWsRef.current = voiceWs;
     attachGuardedVoiceTransportListeners(voiceWs, {
       isCurrent: isCurrentVoiceTransport,
-      onOpen: () => handleVoiceTransportOpened(voiceWs, config, onOpen),
+      onOpen: async () => settleOpen(await handleVoiceTransportOpened(voiceWs, config, onOpen)),
       onMessage: (event) => handleVoiceGatewayMessage(event),
-      onClose: handleVoiceTransportClosed,
-      onError: handleVoiceTransportError,
+      onClose: () => {
+        settleOpen(false);
+        handleVoiceTransportClosed();
+      },
+      onError: () => {
+        settleOpen(false);
+        handleVoiceTransportError();
+      },
     });
-    if (voiceWs.open) await voiceWs.open();
+    if (!voiceWs.open) return true;
+    await voiceWs.open();
+    if (!isCurrentVoiceTransport()) settleOpen(false);
+    return await openHandled;
   }
 
   async function startBridgeVoice(bridge: EvenAppBridge) {
     const voiceConfig = bridgeVoiceStartConfig({
       pendingSessionVoice: pendingSessionVoiceRef.current,
+      transcriptionOnly: Boolean(pendingNodeVoiceCommandIdRef.current),
       activeSessionKey: sessionKeyRef.current,
       createIdempotencyKey: createRequestId,
     });
-    let started = false;
-    await openVoiceWebSocket(
+    return await openVoiceWebSocket(
       voiceConfig,
       async (voiceWs) => {
         const unsubscribeAudio = bridge.onEvenHubEvent((event: EvenHubEvent) => {
@@ -2709,15 +2728,14 @@ export function App() {
           unsubscribeAudio();
           if (voiceWsRef.current === voiceWs) voiceWsRef.current = null;
           if (!voiceWsRef.current) void bridge.audioControl(false).catch(() => undefined);
-          return;
+          return false;
         }
         setActiveVoiceListening();
         startVoiceRecordingPulse();
         renderListeningVoicePanel();
-        started = true;
+        return true;
       },
     );
-    return started;
   }
 
   function stopVoice() {

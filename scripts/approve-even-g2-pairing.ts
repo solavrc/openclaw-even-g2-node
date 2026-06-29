@@ -293,17 +293,15 @@ export function parseNodeStatusPending(text: string): PendingRequest[] {
   });
 }
 
-function isEvenG2Request(request: PendingRequest): boolean {
+export function isEvenG2Request(request: PendingRequest): boolean {
   const displayName = request.displayName?.toLowerCase() || "";
   const platform = request.platform?.toLowerCase() || "";
   const clientId = request.clientId?.toLowerCase() || "";
-  const deviceFamily = request.deviceFamily?.toLowerCase() || "";
   return platform === "even-g2"
     || clientId === "openclaw-even-g2-node"
     || clientId === "node-host"
     || displayName === "even g2"
-    || displayName.includes("even g2")
-    || deviceFamily === "glasses";
+    || displayName.includes("even g2");
 }
 
 function formatRequest(request: PendingRequest): string {

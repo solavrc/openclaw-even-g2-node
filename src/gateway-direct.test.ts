@@ -987,6 +987,60 @@ describe("Gateway direct voice", () => {
     });
   });
 
+  it("emits final transcript text for Talk relay voice without a target session", async () => {
+    const calls: Array<{ method: string; params?: Record<string, unknown> }> = [];
+    const voice = new GatewayDirectVoiceTransport({
+      gateway: {} as never,
+      config: {
+        transcriptionMode: "talk-relay",
+        sessionKey: "agent:main:main",
+        idempotencyKey: "node-voice-1",
+        draftTimeoutMs: 5000,
+        format: {
+          encoding: "pcm_s16le",
+          sampleRateHz: 16000,
+          channels: 1,
+        },
+      },
+      getSessionKey: () => "agent:main:main",
+      request: async (method, params) => {
+        calls.push({ method, params: params as Record<string, unknown> });
+        if (method === "talk.session.create") {
+          return {
+            sessionId: "talk-node-1",
+            audio: {
+              inputEncoding: "g711_ulaw",
+              inputSampleRateHz: 8000,
+            },
+          };
+        }
+        return {};
+      },
+      onClose: () => undefined,
+    });
+    const messages: Array<Record<string, unknown>> = [];
+    voice.addEventListener("message", (event) => {
+      messages.push(JSON.parse((event as MessageEvent).data as string) as Record<string, unknown>);
+    });
+
+    const openPromise = voice.open();
+    await vi.waitFor(() => expect(calls.some((call) => call.method === "talk.session.create")).toBe(true));
+    voice.handleTalkEvent({ type: "ready", transcriptionSessionId: "talk-node-1" });
+    await openPromise;
+    voice.send(pcmToneBytes().buffer);
+    voice.send(JSON.stringify({ type: "utterance.finalize" }));
+    voice.handleTalkEvent({ type: "transcript.done", sessionId: "talk-node-1", text: "Node transcript" });
+
+    await vi.waitFor(() => expect(messages.some((message) => message.type === "transcript.final")).toBe(true));
+    expect(messages).toContainEqual({
+      type: "transcript.final",
+      text: "Node transcript",
+      sessionKey: "agent:main:main",
+      idempotencyKey: "node-voice-1",
+    });
+    expect(messages.some((message) => message.type === "voice.draft.ready")).toBe(false);
+  });
+
   it("best-effort cancels an active OpenClaw Talk session when the voice transport is closed", async () => {
     const calls: Array<{ method: string; params?: Record<string, unknown> }> = [];
     const voice = new GatewayDirectVoiceTransport({

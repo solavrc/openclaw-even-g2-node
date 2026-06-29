@@ -5,7 +5,7 @@ import { pathToFileURL } from "node:url";
 import { appManifestNetworkWhitelist } from "./app-manifest.ts";
 import { dirtyContentSha256, git, porcelainStatusSummary } from "./git-state.ts";
 import { networkReviewMetadata } from "./network-origins.ts";
-import { simulatorSourceSha256 } from "./simulator-source-fingerprint.ts";
+import { isSimulatorSourcePath, simulatorSourceSha256 } from "./simulator-source-fingerprint.ts";
 import { errorStack } from "./strict-helpers.ts";
 import {
   storeScreenshotSourceManifestProblems,
@@ -246,6 +246,17 @@ export function simulatorFixturesGitWarning(
   return null;
 }
 
+export function simulatorRelevantChangedFilesSinceReport(report: SimulatorFixturesReport | null, currentHead: string | null, cwd = ROOT) {
+  const reportHead = report?.git?.head;
+  if (!reportHead || !currentHead || reportHead === currentHead) return null;
+  const changedFiles = git(["diff", "--name-only", `${reportHead}..${currentHead}`], cwd)
+    .split("\n")
+    .map((filePath) => filePath.trim())
+    .filter(Boolean)
+    .filter(isSimulatorSourcePath);
+  return changedFiles;
+}
+
 export function currentPackedBundleWarning({
   bundleEhpkPath,
   bundleSha256,
@@ -475,6 +486,16 @@ export function main(): void {
   const simulatorReport = simulatorFixturesReport();
   const simulatorReportAgeMs = simulatorFixturesReportAgeMs(simulatorReport);
   const currentSimulatorSourceSha256 = simulatorSourceSha256(ROOT);
+  const simulatorWarning = simulatorFixturesWarning(simulatorReport, simulatorReportAgeMs);
+  if (simulatorWarning) warnings.push(simulatorWarning);
+  const simulatorGitWarning = simulatorFixturesGitWarning(simulatorReport, {
+    currentHead,
+    currentDirtyContentSha256,
+    currentSimulatorSourceSha256,
+    currentStatusPorcelain: worktreeStatus,
+    simulatorRelevantChangedFilesSinceReport: simulatorRelevantChangedFilesSinceReport(simulatorReport, currentHead),
+  });
+  if (simulatorGitWarning) warnings.push(simulatorGitWarning);
 
   const network = networkReviewMetadata(appManifestNetworkWhitelist(appManifest));
   const whitelist = network.whitelist;

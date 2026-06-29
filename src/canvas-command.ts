@@ -95,8 +95,20 @@ export function canvasImageDataUrlFromParams(params: Record<string, unknown>): C
 }
 
 export function hasRemoteCanvasImage(params: Record<string, unknown>) {
-  const url = typeof params.url === "string" ? params.url.trim() : "";
-  return /^https?:\/\//i.test(url) && /\.(png|jpe?g|webp|gif|bmp)(\?|#|$)/i.test(url);
+  const candidates = [
+    params.imageDataUrl,
+    params.dataUrl,
+    params.image,
+    params.imageData,
+    params.imageBase64,
+    params.base64,
+    params.url,
+  ];
+  return candidates.some((candidate) => {
+    if (typeof candidate !== "string") return false;
+    const value = candidate.trim();
+    return /^https?:\/\//i.test(value) && /\.(png|jpe?g|webp|gif|bmp)(\?|#|$)/i.test(value);
+  });
 }
 
 export function canvasPresentationKindFromParams(params: Record<string, unknown>): CanvasPresentationKind {

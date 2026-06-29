@@ -49,6 +49,8 @@ describe("canvasImageDataUrlFromParams", () => {
 describe("hasRemoteCanvasImage", () => {
   it("only flags remote image urls", () => {
     expect(hasRemoteCanvasImage({ url: "https://example.com/image.webp?x=1" })).toBe(true);
+    expect(hasRemoteCanvasImage({ image: "https://example.com/image.png" })).toBe(true);
+    expect(hasRemoteCanvasImage({ dataUrl: "https://example.com/image.jpg#preview" })).toBe(true);
     expect(hasRemoteCanvasImage({ url: "https://example.com/page" })).toBe(false);
   });
 });
@@ -72,6 +74,10 @@ describe("canvasNodeCommandPlan", () => {
       },
     });
     expect(canvasNodeCommandPlan("canvas.present", { url: "https://example.com/image.png" })).toEqual({
+      action: "remote-image-unsupported",
+      requiresBridge: true,
+    });
+    expect(canvasNodeCommandPlan("canvas.present", { image: "https://example.com/image.png", title: "Chart" })).toEqual({
       action: "remote-image-unsupported",
       requiresBridge: true,
     });
