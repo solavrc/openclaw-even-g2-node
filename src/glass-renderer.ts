@@ -61,6 +61,23 @@ function devLog(...args: unknown[]) {
   if (import.meta.env.DEV) globalThis["console"].info(...args);
 }
 
+function e2eGlassLogEnabled() {
+  if (import.meta.env.DEV) return true;
+  try {
+    return new URLSearchParams(globalThis.location?.search || "").has("e2eLog");
+  } catch {
+    return false;
+  }
+}
+
+function emitE2eGlassState(payload: Record<string, unknown>) {
+  if (!e2eGlassLogEnabled()) return;
+  globalThis["console"].info("[openclaw-even-g2-node:e2e:glass]", JSON.stringify({
+    emittedAt: new Date().toISOString(),
+    ...payload,
+  }));
+}
+
 export function displayTextForGlass(text: string) {
   return text
     .replace(/`/g, "'")
@@ -291,6 +308,7 @@ export async function renderGlassTextFrame(bridge: GlassTextBridge | null, frame
     bridgeWithState.__openClawEvenG2GlassPageCreated = true;
     bridgeWithState.__openClawEvenG2GlassLayout = layout;
     setGlassTextCache(bridgeWithState, cacheEntries);
+    emitE2eGlassState({ layout, frame });
     return true;
   }
 
@@ -300,16 +318,23 @@ export async function renderGlassTextFrame(bridge: GlassTextBridge | null, frame
     if (ok === true) {
       bridgeWithState.__openClawEvenG2GlassLayout = layout;
       setGlassTextCache(bridgeWithState, cacheEntries);
+      emitE2eGlassState({ layout, frame });
     }
     return ok === true;
   }
 
   const updated = await upgradeChangedGlassText(bridge, cacheEntries);
-  if (updated) return true;
+  if (updated) {
+    emitE2eGlassState({ layout, frame });
+    return true;
+  }
 
   const ok = await bridge.rebuildPageContainer(new RebuildPageContainer(page));
   devLog("[Even G2] rebuildPageContainer result", ok, { layout });
-  if (ok === true) setGlassTextCache(bridgeWithState, cacheEntries);
+  if (ok === true) {
+    setGlassTextCache(bridgeWithState, cacheEntries);
+    emitE2eGlassState({ layout, frame });
+  }
   return ok === true;
 }
 
@@ -365,7 +390,9 @@ export async function renderGlassImageCanvas(bridge: GlassImageBridge | null, ti
     imageData: tile.imageData,
   }))));
   devLog("[Even G2] image canvas update results", updates);
-  return updates.every((result) => ImageRawDataUpdateResult.isSuccess(result));
+  const ok = updates.every((result) => ImageRawDataUpdateResult.isSuccess(result));
+  if (ok) emitE2eGlassState({ layout, imageTileCount: tiles.length });
+  return ok;
 }
 
 export async function renderGlassVoicePanelFrame(bridge: GlassTextBridge | null, frame: GlassVoicePanelFrame): Promise<boolean> {
@@ -386,14 +413,45 @@ export async function renderGlassVoicePanelFrame(bridge: GlassTextBridge | null,
     bridgeWithState.__openClawEvenG2GlassPageCreated = true;
     bridgeWithState.__openClawEvenG2GlassLayout = layout;
     setGlassTextCache(bridgeWithState, cacheEntries);
+    emitE2eGlassState({
+      layout,
+      frame: {
+        header: frame.base.header,
+        body: shortText(frame.body, 260),
+        hint: shortText(frame.hint, 44),
+      },
+      title: frame.title,
+    });
     return true;
   }
 
   const updated = await upgradeChangedGlassText(bridge, cacheEntries);
-  if (updated) return true;
+  if (updated) {
+    emitE2eGlassState({
+      layout,
+      frame: {
+        header: frame.base.header,
+        body: shortText(frame.body, 260),
+        hint: shortText(frame.hint, 44),
+      },
+      title: frame.title,
+    });
+    return true;
+  }
 
   const ok = await bridge.rebuildPageContainer(new RebuildPageContainer(page));
   devLog("[Even G2] voice panel rebuild result", ok, { layout });
-  if (ok === true) setGlassTextCache(bridgeWithState, cacheEntries);
+  if (ok === true) {
+    setGlassTextCache(bridgeWithState, cacheEntries);
+    emitE2eGlassState({
+      layout,
+      frame: {
+        header: frame.base.header,
+        body: shortText(frame.body, 260),
+        hint: shortText(frame.hint, 44),
+      },
+      title: frame.title,
+    });
+  }
   return ok === true;
 }

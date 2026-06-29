@@ -183,6 +183,55 @@ Treat it as optional visual-smoke context, not release evidence: app permissions
 packaged runtime behavior, OpenClaw state, and real glasses behavior still need
 the appropriate private/beta build checks.
 
+## Agentic E2E Review
+
+For Coding Agent development loops, use an evidence bundle instead of a brittle
+pixel-perfect assertion. The goal is to let the agent compare simulator output,
+OpenClaw node state, and [user-stories.md](user-stories.md) with fuzzy product
+judgment.
+
+Start the app and simulator as usual. For production-build simulator runs where
+the agent needs structured HUD state logs, add `?e2eLog=1` to the app URL:
+
+```bash
+pnpm build
+pnpm serve:sim
+pnpm simulator 'http://127.0.0.1:35162/openclaw-even-g2-node/?e2eLog=1' --automation-port 9898
+pnpm e2e:agent
+```
+
+`pnpm e2e:agent` writes a run directory under
+`.openclaw-even-g2-node/e2e-agent-runs/` containing:
+
+- a snapshot of `docs/user-stories.md`;
+- simulator glasses and phone WebView screenshots;
+- simulator console logs and structured glass state markers when available;
+- OpenClaw `device.status` and `canvas.snapshot` command evidence when the
+  local `openclaw` CLI can reach the active Gateway;
+- `review-prompt.md`, which tells the Coding Agent how to judge the run;
+- `llm-review.template.json`, which the Coding Agent can replace with its
+  structured verdict.
+
+To include a live OpenClaw node display mutation, run:
+
+```bash
+pnpm e2e:agent:live
+```
+
+This also invokes `canvas.present` on the configured Even G2 node before reading
+`canvas.snapshot`. Override the node or text when needed:
+
+```bash
+pnpm e2e:agent:live -- --node "Even G2" --canvas-text "E2E canvas check"
+```
+
+The intended reviewer is the Coding Agent itself, a separate Codex session, or
+an OpenClaw-routed agent. The reviewer should return `pass`, `warn`, `fail`, or
+`inconclusive` per story. It should treat missing evidence as inconclusive,
+judge semantic user-story fit rather than exact wording, and fail regressions
+where the phone becomes the primary chat surface or provider/Gateway ownership
+moves into the app.
+
 There is also a manual GitHub Actions workflow, `Simulator Fixtures`, that runs
 the same command under `xvfb-run` and uploads the fixture report plus captured
 simulator PNG/PGM files as artifacts. Keep it manual unless the simulator
@@ -371,6 +420,8 @@ failure.
 | `pnpm sim:run` | Simulator | Starts official simulator against the local static URL. |
 | `pnpm sim:capture` | Simulator | Requires simulator automation server. |
 | `pnpm sim:fixtures` | Simulator / local visual smoke | Starts setup plus fixture simulator runs and checks HUD/WebView screenshots. |
+| `pnpm e2e:agent` | Agentic local review | Collects simulator/OpenClaw evidence and writes a prompt for Coding Agent fuzzy review. |
+| `pnpm e2e:agent:live` | Agentic local review | Same as `e2e:agent`, but also invokes `canvas.present` on the active OpenClaw node. |
 | `pnpm run pack` | Packaging | Builds and writes `openclaw-even-g2-node.ehpk`. |
 | `pnpm release:check` | CI / release gate | Runs broad release checks; release status separately reports the runtime Gateway whitelist review risk. |
 | `pnpm release:bundle` | Release artifact | Creates the local release bundle directory and prints the full bundle manifest JSON. |

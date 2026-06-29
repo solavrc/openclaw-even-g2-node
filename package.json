@@ -41,6 +41,8 @@
     "sim:capture": "tsx scripts/evenhub-simulator-capture.ts",
     "sim:e2e": "tsx scripts/evenhub-simulator-e2e.ts",
     "sim:fixtures": "tsx scripts/evenhub-simulator-fixtures.ts",
+    "e2e:agent": "tsx scripts/e2e-agent-review.ts",
+    "e2e:agent:live": "tsx scripts/e2e-agent-review.ts --openclaw-live-canvas",
     "smoke:voice-review": "tsx scripts/evenhub-simulator-voice-review-smoke.ts",
     "docs:links": "tsx scripts/check-markdown-links.ts",
     "diag:touch-watch": "tsx scripts/diag-physical-touch-watch.ts",
