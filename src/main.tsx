@@ -466,6 +466,7 @@ export function App() {
   const sessionTranscriptRawLimitRef = useRef(SESSION_TRANSCRIPT_INITIAL_RAW_LIMIT);
   const sessionTranscriptHasFullHistoryRef = useRef(false);
   const sessionTranscriptLoadingLimitRef = useRef<number | null>(null);
+  const sessionTranscriptRequestedSessionKeyRef = useRef("");
   const pendingHistoryExpandRef = useRef<{ sessionKey: string; limit: number } | null>(null);
   const canvasTextRef = useRef("");
   const canvasModeRef = useRef<CanvasMode>("text");
@@ -860,6 +861,7 @@ export function App() {
     const requestedLimit = sessionTranscriptRequestLimit(options.limit, sessionTranscriptRawLimitRef.current);
     if (!options.force && sessionTranscriptLoadingLimitRef.current !== null && sessionTranscriptLoadingLimitRef.current >= requestedLimit) return;
     sessionTranscriptLoadingLimitRef.current = requestedLimit;
+    sessionTranscriptRequestedSessionKeyRef.current = nextSessionKey;
     if (options.expand) pendingHistoryExpandRef.current = { sessionKey: nextSessionKey, limit: requestedLimit };
     sendGatewayOutboxRequest(ws, gatewaySessionTranscriptGetRequest(nextSessionKey, requestedLimit));
   }
@@ -930,6 +932,15 @@ export function App() {
   function clearSessionTranscriptLoadingState() {
     sessionTranscriptLoadingLimitRef.current = null;
     pendingHistoryExpandRef.current = null;
+  }
+
+  function resetPairingScopedState() {
+    resetSessionTranscriptState();
+    setActiveSessionKey("");
+    applySessionList([]);
+    setActiveNodeSnapshot(null);
+    setActivePendingApproval(null);
+    setNodeApprovalStatus(null);
   }
 
   function maxSessionLogCursor(messages = sessionTranscriptRef.current) {
@@ -1635,9 +1646,7 @@ export function App() {
     userEditedSettingsRef.current = true;
     disconnect();
     setActiveGatewayUrl("", { setupDraft: true });
-    resetSessionTranscriptState();
-    setActiveNodeSnapshot(null);
-    setActivePendingApproval(null);
+    resetPairingScopedState();
     setSetupScanStatus("Setup code removed. Scan a new OpenClaw QR to sign in again.");
     setActiveTalkReviewStatus(unknownTalkCatalogReviewStatus());
     clearBrowserClientSettings(localStorage, clearBrowserDeviceCredentials);
@@ -1766,6 +1775,7 @@ export function App() {
     setSetupScannerOpen(false);
     disconnect();
     setActiveGatewayUrl(normalized, { setupDraft: true });
+    resetPairingScopedState();
     setSetupScanStatus("Setup QR scanned. Connecting...");
     void renderGlass(setupQrScannedHudFrame());
   }, []);
@@ -1891,6 +1901,7 @@ export function App() {
     msg: GatewaySessionTranscriptSnapshotMessage,
   ) {
     if (msg.sessionKey && msg.sessionKey !== sessionKeyRef.current) return;
+    if (!msg.sessionKey && sessionTranscriptRequestedSessionKeyRef.current && sessionTranscriptRequestedSessionKeyRef.current !== sessionKeyRef.current) return;
     const update = sessionTranscriptSnapshotUpdate({
       snapshot: msg,
       loadingLimit: sessionTranscriptLoadingLimitRef.current,
@@ -2214,6 +2225,7 @@ export function App() {
       return;
     }
     scheduleCanvasMessageRestore(glassText, presentation.ttlMs);
+    completeCanvasTutorial();
     sendNodeCommandResult(id, true, messageCanvasCommandResult(kind, presentation));
   }
 
@@ -2352,7 +2364,7 @@ export function App() {
 
   function updateVoiceText(text: string) {
     voiceTextRef.current = text;
-    renderListeningVoicePanel();
+    if (listeningRef.current && glassViewRef.current === "listening") renderListeningVoicePanel();
   }
 
   function resetVoiceTranscript() {
@@ -2605,6 +2617,9 @@ export function App() {
   }
 
   function handleVoiceTransportClosed() {
+    voiceWsRef.current = null;
+    clearVoiceAudioSubscription();
+    void bridgeRef.current?.audioControl(false).catch(() => undefined);
     clearVoiceCaptureTimers();
     setActiveListening(false);
     stopVoiceMediaStream();
@@ -2673,10 +2688,11 @@ export function App() {
       activeSessionKey: sessionKeyRef.current,
       createIdempotencyKey: createRequestId,
     });
+    let started = false;
     await openVoiceWebSocket(
       voiceConfig,
       async (voiceWs) => {
-        unsubscribeAudioRef.current = bridge.onEvenHubEvent((event: EvenHubEvent) => {
+        const unsubscribeAudio = bridge.onEvenHubEvent((event: EvenHubEvent) => {
           const audioPcm = event.audioEvent?.audioPcm;
           if (!audioPcm || !canSendVoiceAudio({
             byteLength: audioPcm?.byteLength,
@@ -2685,13 +2701,23 @@ export function App() {
           })) return;
           voiceWs.send(arrayBufferBackedBytes(audioPcm));
         });
+        unsubscribeAudioRef.current = unsubscribeAudio;
         const opened = await bridge.audioControl(true);
         if (!opened) throw new Error("G2 microphone did not open");
+        if (voiceWsRef.current !== voiceWs || !isGatewayTransportOpen(voiceWs.readyState, WebSocket.OPEN)) {
+          if (unsubscribeAudioRef.current === unsubscribeAudio) unsubscribeAudioRef.current = null;
+          unsubscribeAudio();
+          if (voiceWsRef.current === voiceWs) voiceWsRef.current = null;
+          if (!voiceWsRef.current) void bridge.audioControl(false).catch(() => undefined);
+          return;
+        }
         setActiveVoiceListening();
         startVoiceRecordingPulse();
         renderListeningVoicePanel();
+        started = true;
       },
     );
+    return started;
   }
 
   function stopVoice() {
@@ -2746,7 +2772,10 @@ export function App() {
       resetVoiceTranscript();
       setPendingVoiceStart(options);
       const bridge = bridgeRef.current;
-      if (bridge) await startBridgeVoice(bridge);
+      if (bridge) {
+        const started = await startBridgeVoice(bridge);
+        if (!started) return;
+      }
       else throw new Error("Voice input requires a live Even G2 bridge. Browser microphone fallback is disabled for Gateway direct voice.");
       scheduleVoiceStartTimers(options);
     } catch (err) {

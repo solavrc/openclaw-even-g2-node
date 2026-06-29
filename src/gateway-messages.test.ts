@@ -48,6 +48,7 @@ describe("gateway message parsing", () => {
     expect(pendingApprovalResolved(current, { type: "eveng2.approval.resolved", id: "a" })).toBe(true);
     expect(pendingApprovalResolved(current, { type: "eveng2.approval.resolved", requestId: "r" })).toBe(true);
     expect(pendingApprovalResolved(current, { type: "eveng2.approval.resolved", id: "other" })).toBe(false);
+    expect(pendingApprovalResolved({ type: "eveng2.approval.request" }, { type: "eveng2.approval.resolved" })).toBe(false);
     expect(pendingApprovalResolved(null, { type: "eveng2.approval.resolved", id: "a" })).toBe(false);
   });
 
@@ -83,6 +84,16 @@ describe("gateway message parsing", () => {
     });
     expect(gatewayApprovalUpdate({
       type: "eveng2.approval.resolve.ack",
+      status: "accepted",
+    }, current)).toEqual({
+      action: "ack",
+      status: "accepted",
+      shouldClearPendingApproval: false,
+      renderSessionHomeStatus: "",
+    });
+    expect(gatewayApprovalUpdate({
+      type: "eveng2.approval.resolve.ack",
+      requestId: "r",
       status: "accepted",
     }, current)).toEqual({
       action: "ack",

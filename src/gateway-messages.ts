@@ -124,13 +124,24 @@ export function pendingApprovalResolved(
   current: PendingApproval | null,
   resolved: GatewayApprovalResolvedMessage,
 ) {
-  return Boolean(current && (current.id === resolved.id || current.requestId === resolved.requestId));
+  return approvalMessagesMatch(current, resolved);
 }
 
 export function approvalResolveAckAccepted(
   ack: GatewayApprovalResolveAckMessage,
 ) {
   return ack.status === "accepted";
+}
+
+function approvalMessagesMatch(
+  current: PendingApproval | null,
+  message: Pick<GatewayApprovalResolvedMessage | GatewayApprovalResolveAckMessage, "id" | "requestId">,
+) {
+  if (!current) return false;
+  return Boolean(
+    (current.id && message.id && current.id === message.id)
+    || (current.requestId && message.requestId && current.requestId === message.requestId),
+  );
 }
 
 export type GatewayApprovalUpdate =
@@ -171,11 +182,12 @@ export function gatewayApprovalUpdate(
     };
   }
   const accepted = approvalResolveAckAccepted(message);
+  const shouldClearPendingApproval = accepted && approvalMessagesMatch(current, message);
   return {
     action: "ack",
     status: message.status,
-    shouldClearPendingApproval: accepted,
-    renderSessionHomeStatus: accepted ? "approval sent" : "",
+    shouldClearPendingApproval,
+    renderSessionHomeStatus: shouldClearPendingApproval ? "approval sent" : "",
   };
 }
 

@@ -5,6 +5,7 @@ import { pathToFileURL } from "node:url";
 import { appManifestNetworkWhitelist } from "./app-manifest.ts";
 import { dirtyContentSha256, git, porcelainStatusSummary } from "./git-state.ts";
 import { networkReviewMetadata } from "./network-origins.ts";
+import { simulatorSourceSha256 } from "./simulator-source-fingerprint.ts";
 import { errorStack } from "./strict-helpers.ts";
 import {
   storeScreenshotSourceManifestProblems,
@@ -473,6 +474,7 @@ export function main(): void {
 
   const simulatorReport = simulatorFixturesReport();
   const simulatorReportAgeMs = simulatorFixturesReportAgeMs(simulatorReport);
+  const currentSimulatorSourceSha256 = simulatorSourceSha256(ROOT);
 
   const network = networkReviewMetadata(appManifestNetworkWhitelist(appManifest));
   const whitelist = network.whitelist;
@@ -502,7 +504,7 @@ export function main(): void {
     for (const submissionCopyProblem of submissionCopyBundleProblems(bundleDir)) {
       blockPrivate(submissionCopyProblem);
     }
-    for (const screenshotProblem of storeScreenshotBundleProblems(bundle, bundleDir)) {
+    for (const screenshotProblem of storeScreenshotBundleProblems(bundle, bundleDir, currentSimulatorSourceSha256)) {
       blockPrivate(screenshotProblem);
     }
     const bundleGitWarning = releaseBundleGitWarning(bundle, {
