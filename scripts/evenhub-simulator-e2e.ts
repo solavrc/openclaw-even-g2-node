@@ -6,7 +6,7 @@ import {
   type SimulatorCapture,
 } from "./simulator-utils.js";
 
-type SimFlow = "auto" | "setup" | "session" | "voiceReview" | "canvas" | "canvasTutorial" | "approval" | "recovery" | "storeChat" | "storeVoice";
+type SimFlow = "auto" | "setup" | "session" | "sessionSelector" | "voiceReview" | "canvas" | "canvasTutorial" | "approval" | "recovery" | "storeChat" | "storeVoice";
 
 const BASE_URL = process.env.EVENG2_SIMULATOR_URL || "http://127.0.0.1:9898";
 const OUT_DIR = process.env.EVENG2_SIMULATOR_OUT_DIR || "/tmp";
@@ -17,6 +17,7 @@ function normalizeFlow(value: string | undefined): SimFlow {
   if (
     value === "setup"
     || value === "session"
+    || value === "sessionSelector"
     || value === "voiceReview"
     || value === "canvas"
     || value === "canvasTutorial"
@@ -67,6 +68,17 @@ async function inputAndCapture(action: Parameters<typeof sendSimulatorInput>[1],
   return captureStep(label);
 }
 
+async function waitForConsoleText(pattern: string, timeoutMs: number) {
+  const deadline = Date.now() + timeoutMs;
+  let lastText = "";
+  while (Date.now() < deadline) {
+    lastText = await simulatorConsoleText(BASE_URL);
+    if (lastText.includes(pattern)) return lastText;
+    await sleep(250);
+  }
+  throw new Error(`Timed out waiting for simulator console pattern ${pattern}. Last console text:\n${lastText}`);
+}
+
 async function runSetupSmoke(initial: SimulatorCapture) {
   return {
     flow: "setup",
@@ -93,7 +105,31 @@ async function runSessionFlow(initial: SimulatorCapture) {
   };
 }
 
-async function runVisualFixtureFlow(initial: SimulatorCapture, flow: Exclude<SimFlow, "auto" | "setup" | "session">) {
+async function runSessionSelectorFlow(initial: SimulatorCapture) {
+  const consoleText = await waitForConsoleText("selector-flow-change-dispatched", 8_000);
+  for (const expected of [
+    "refresh-sessions",
+    "switch-session",
+    "eveng2.session.switch.applied",
+    "transcript-snapshot",
+  ]) {
+    if (!consoleText.includes(expected)) {
+      throw new Error(`Expected session selector console marker ${expected}`);
+    }
+  }
+  await sleep(500);
+  const switched = await captureStep("session-selector-switch");
+
+  return {
+    flow: "sessionSelector",
+    steps: [
+      stepEvidence("initial-session", initial),
+      stepEvidence("phone-selector-switch", switched, "phone-select-change"),
+    ],
+  };
+}
+
+async function runVisualFixtureFlow(initial: SimulatorCapture, flow: Exclude<SimFlow, "auto" | "setup" | "session" | "sessionSelector">) {
   const consoleText = await simulatorConsoleText(BASE_URL);
   const marker = `simFixture=${flow}`;
   if (!consoleText.includes(marker)) {
@@ -135,6 +171,8 @@ async function main() {
     : FLOW;
   const result = flow === "session"
     ? await runSessionFlow(initial)
+    : flow === "sessionSelector"
+      ? await runSessionSelectorFlow(initial)
     : flow === "setup"
       ? await runSetupSmoke(initial)
       : await runVisualFixtureFlow(initial, flow);

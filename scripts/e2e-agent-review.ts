@@ -59,6 +59,7 @@ type SimulatorEvidence = {
   enabled: boolean;
   error?: string;
   glassStates: unknown[];
+  sessionStates: unknown[];
   visible: boolean;
 };
 
@@ -71,6 +72,7 @@ const DEFAULT_OPENCLAW_PROFILE = process.env.EVENG2_E2E_OPENCLAW_PROFILE || "";
 const DEFAULT_OPENCLAW_URL = process.env.EVENG2_E2E_OPENCLAW_URL || "";
 const DEFAULT_OPENCLAW_TOKEN = process.env.EVENG2_E2E_OPENCLAW_TOKEN || "";
 const E2E_GLASS_MARKER = "[openclaw-even-g2-node:e2e:glass]";
+const E2E_SESSION_MARKER = "[openclaw-even-g2-node:e2e:session]";
 
 const HELP = `Collect an agent-review evidence bundle for Even G2 user-story E2E review.
 
@@ -203,17 +205,25 @@ function parseJsonObject(text: string): unknown | null {
   }
 }
 
-export function parseE2eGlassMarkers(consoleText: string): unknown[] {
+function parseE2eMarkers(consoleText: string, marker: string): unknown[] {
   return consoleText
     .split(/\r?\n/)
     .map((line) => {
-      const markerIndex = line.indexOf(E2E_GLASS_MARKER);
+      const markerIndex = line.indexOf(marker);
       if (markerIndex < 0) return null;
-      const jsonText = line.slice(markerIndex + E2E_GLASS_MARKER.length).trim();
+      const jsonText = line.slice(markerIndex + marker.length).trim();
       return parseJsonObject(jsonText);
     })
     .filter((value): value is unknown => value !== null)
     .map(redactValue);
+}
+
+export function parseE2eGlassMarkers(consoleText: string): unknown[] {
+  return parseE2eMarkers(consoleText, E2E_GLASS_MARKER);
+}
+
+export function parseE2eSessionMarkers(consoleText: string): unknown[] {
+  return parseE2eMarkers(consoleText, E2E_SESSION_MARKER);
 }
 
 function writeJson(filePath: string, value: unknown) {
@@ -292,7 +302,7 @@ function openClawGatewayArgs(args: ParsedArgs, commandArgs: string[]) {
 }
 
 async function collectSimulatorEvidence(args: ParsedArgs, outDir: string): Promise<SimulatorEvidence> {
-  if (args.skipSimulator) return { enabled: false, glassStates: [], visible: false };
+  if (args.skipSimulator) return { enabled: false, glassStates: [], sessionStates: [], visible: false };
   const consolePath = path.join(outDir, "simulator-console.txt");
   try {
     const capture = await captureSimulator(args.simulatorUrl, outDir, "agent-review");
@@ -304,6 +314,7 @@ async function collectSimulatorEvidence(args: ParsedArgs, outDir: string): Promi
       consolePath,
       enabled: true,
       glassStates: parseE2eGlassMarkers(consoleText),
+      sessionStates: parseE2eSessionMarkers(consoleText),
       visible: true,
     };
   } catch (error) {
@@ -312,6 +323,7 @@ async function collectSimulatorEvidence(args: ParsedArgs, outDir: string): Promi
       enabled: true,
       error: errorStack(error),
       glassStates: [],
+      sessionStates: [],
       visible: false,
     };
   }
@@ -377,6 +389,11 @@ function deterministicChecks(simulator: SimulatorEvidence, openclaw: OpenClawEvi
       name: "glass-state-marker",
       ok: !simulator.enabled || simulator.glassStates.length > 0,
       detail: simulator.enabled ? `${simulator.glassStates.length} e2e glass state marker(s)` : "simulator skipped",
+    },
+    {
+      name: "session-state-marker",
+      ok: true,
+      detail: simulator.enabled ? `${simulator.sessionStates.length} e2e session state marker(s)` : "simulator skipped",
     },
     {
       name: "openclaw-node-status",

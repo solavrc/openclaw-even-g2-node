@@ -115,6 +115,10 @@ and then selects the flow from the current HUD density:
 - setup-like HUD: verifies first-run setup visibility;
 - session-like HUD: verifies selected-session visibility. Session switching is
   owned by the phone Session selector, not by a glasses session picker.
+- `sessionSelector` flow: with the dev fixture flag below, exercises the phone
+  Session selector by dispatching real focus/mousedown/change events, verifies
+  the app sent refresh/switch/transcript Gateway requests, then captures the
+  switched glasses/phone state.
 
 Force a mode when needed:
 
@@ -395,6 +399,13 @@ with the dev-only session fixture:
 pnpm dev
 pnpm simulator 'http://127.0.0.1:5174/?resetPairing=1&simFixture=session' --automation-port 9898
 EVENG2_SIM_FLOW=session pnpm sim:e2e
+```
+
+To cover Story 3's phone selector path locally:
+
+```bash
+pnpm simulator 'http://127.0.0.1:5174/?resetPairing=1&simFixture=session&simSessionSelectorFlow=1' --automation-port 9898
+EVENG2_SIM_FLOW=sessionSelector pnpm sim:e2e
 ```
 
 Replace `session` with `voiceReview`, `canvas`, `canvasTutorial`, `approval`,

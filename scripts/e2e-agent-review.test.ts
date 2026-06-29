@@ -3,6 +3,7 @@ import {
   buildReviewPrompt,
   parseArgs,
   parseE2eGlassMarkers,
+  parseE2eSessionMarkers,
   redactCommandArgs,
   redactText,
 } from "./e2e-agent-review.ts";
@@ -95,6 +96,18 @@ describe("e2e agent review helpers", () => {
     expect(states).toEqual([
       { layout: "text-frame", frame: { header: "main · agent" } },
       { layout: "voice-panel", token: "<redacted>" },
+    ]);
+  });
+
+  it("extracts structured session state markers from simulator console text", () => {
+    const states = parseE2eSessionMarkers([
+      "[openclaw-even-g2-node:e2e:session] {\"action\":\"switch-session\",\"toSessionKey\":\"agent:main:direct:notes\"}",
+      "[openclaw-even-g2-node:e2e:session] {\"action\":\"gateway-send\",\"token\":\"secret\"}",
+    ].join("\n"));
+
+    expect(states).toEqual([
+      { action: "switch-session", toSessionKey: "agent:main:direct:notes" },
+      { action: "gateway-send", token: "<redacted>" },
     ]);
   });
 

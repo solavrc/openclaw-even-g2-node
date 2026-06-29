@@ -20,13 +20,9 @@ describe("LLM review schema", () => {
   });
 
   it("rejects invalid verdicts and confidence ranges", () => {
-    const review = createLlmReviewTemplate() as unknown as {
-      overallVerdict: string;
-      storyReviews: Array<{ confidence: number; verdict: string }>;
-    };
-    review.overallVerdict = "maybe";
-    review.storyReviews[0].verdict = "ok";
-    review.storyReviews[0].confidence = 1.2;
+    const review = createLlmReviewTemplate();
+    Object.assign(review, { overallVerdict: "maybe" });
+    Object.assign(review.storyReviews[0], { verdict: "ok", confidence: 1.2 });
 
     expect(validateLlmReview(review)).toEqual(expect.arrayContaining([
       "overallVerdict must be one of: pass, warn, fail, inconclusive.",
@@ -36,18 +32,13 @@ describe("LLM review schema", () => {
   });
 
   it("requires non-empty summaries and string-array evidence fields", () => {
-    const review = createLlmReviewTemplate() as unknown as {
-      storyReviews: Array<{
-        concerns: unknown;
-        matchedEvidence: unknown;
-        requiredFixes: unknown;
-        summary: string;
-      }>;
-    };
-    review.storyReviews[0].summary = "";
-    review.storyReviews[0].matchedEvidence = ["ok", 1];
-    review.storyReviews[0].concerns = "none";
-    review.storyReviews[0].requiredFixes = [false];
+    const review = createLlmReviewTemplate();
+    Object.assign(review.storyReviews[0], {
+      concerns: "none",
+      matchedEvidence: ["ok", 1],
+      requiredFixes: [false],
+      summary: "",
+    });
 
     expect(validateLlmReview(review)).toEqual(expect.arrayContaining([
       "storyReviews[0].summary must be a non-empty string.",

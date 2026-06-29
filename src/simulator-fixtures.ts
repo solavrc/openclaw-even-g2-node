@@ -58,6 +58,26 @@ export const SIMULATOR_FIXTURE_TRANSCRIPT: SessionTranscriptMessage[] = [
   },
 ];
 
+export function simulatorFixtureTranscriptForSession(sessionKey: string): SessionTranscriptMessage[] {
+  if (sessionKey === SIMULATOR_FIXTURE_SESSION_KEY) return SIMULATOR_FIXTURE_TRANSCRIPT;
+  const session = SIMULATOR_FIXTURE_SESSIONS.find((entry) => entry.key === sessionKey);
+  const preview = session?.preview || session?.lastUserMessage || session?.lastAgentMessage || `Selected ${sessionKey}`;
+  return [
+    {
+      id: `fixture-${sessionKey}-user`,
+      role: "user",
+      text: preview,
+      timestamp: "2026-06-25T12:05:00.000Z",
+    },
+    {
+      id: `fixture-${sessionKey}-assistant`,
+      role: "assistant",
+      text: `Fixture transcript loaded for ${sessionKey}.`,
+      timestamp: "2026-06-25T12:05:08.000Z",
+    },
+  ];
+}
+
 export const STORE_CHAT_FIXTURE_TRANSCRIPT: SessionTranscriptMessage[] = [
   {
     id: "store-chat-user-1",
@@ -197,4 +217,9 @@ export function simulatorFixtureModeFromSearch(search: string, isDev: boolean) {
   if (!isDev) return "";
   const value = new URLSearchParams(search).get("simFixture") || "";
   return isSimulatorFixtureMode(value) ? value : "";
+}
+
+export function simulatorSessionSelectorFlowFromSearch(search: string, isDev: boolean) {
+  if (!isDev) return false;
+  return new URLSearchParams(search).get("simSessionSelectorFlow") === "1";
 }
