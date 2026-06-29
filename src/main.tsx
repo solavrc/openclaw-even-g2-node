@@ -1970,7 +1970,6 @@ export function App() {
   function handleGatewayReadyOrRuntimeStatus(msg: GatewayReadyOrRuntimeStatusMessage) {
     if (msg.type === "eveng2.runtime.status") {
       const update = runtimeStatusSessionUpdate(msg, sessionKeyRef.current);
-      if (update.nodeSnapshot?.nodeConnected) stripBootstrapSetupTokenFromState();
       if (update.nextSessionKey) {
         setActiveSessionKey(update.nextSessionKey);
         if (update.shouldRequestTranscript) requestSessionTranscript(update.nextSessionKey);

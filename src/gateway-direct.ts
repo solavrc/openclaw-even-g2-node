@@ -647,6 +647,18 @@ function closeReasonFromEvent(event?: CloseEvent) {
   return typeof event?.reason === "string" ? event.reason.trim() : "";
 }
 
+function shouldPauseOperatorReconnect(reason: string) {
+  const normalized = reason.toLowerCase();
+  return (
+    normalized.includes("auth") ||
+    normalized.includes("unauthorized") ||
+    normalized.includes("not approved") ||
+    normalized.includes("approval") ||
+    normalized.includes("pairing required") ||
+    normalized.includes("scope upgrade")
+  );
+}
+
 function makeTransportCloseEvent(reason = "") {
   if (typeof CloseEvent === "function") return new CloseEvent("close", { code: reason ? 1008 : 1000, reason });
   const event = new Event("close") as Event & Partial<CloseEvent>;
@@ -1351,7 +1363,11 @@ export class GatewayDirectTransport extends EventTarget {
     if (this.operatorSession !== session) return;
     if (this.nodeSessionOpen) {
       this.operatorSession = null;
-      this.emit({ type: "error", error: error.message, pauseReconnect: true });
+      this.emit({
+        type: "error",
+        error: error.message,
+        ...(shouldPauseOperatorReconnect(error.message) ? { pauseReconnect: true } : {}),
+      });
       return;
     }
     this.fail(error);
@@ -1362,7 +1378,13 @@ export class GatewayDirectTransport extends EventTarget {
     const reason = closeReasonFromEvent(event);
     if (this.nodeSessionOpen) {
       this.operatorSession = null;
-      if (reason) this.emit({ type: "error", error: reason, pauseReconnect: true });
+      if (reason) {
+        this.emit({
+          type: "error",
+          error: reason,
+          ...(shouldPauseOperatorReconnect(reason) ? { pauseReconnect: true } : {}),
+        });
+      }
       return;
     }
     if (reason) this.fail(new Error(reason));

@@ -1179,6 +1179,30 @@ describe("Gateway direct voice", () => {
     });
   });
 
+  it("allows reconnect after transient operator session errors while the node session stays open", () => {
+    const gateway = new GatewayDirectTransport({
+      setupCodeOrUrl: "ws://127.0.0.1:18789",
+      token: "",
+    });
+    const session = {};
+    const messages: Array<Record<string, unknown>> = [];
+    gateway.addEventListener("message", (event) => {
+      messages.push(JSON.parse((event as MessageEvent).data as string) as Record<string, unknown>);
+    });
+    Reflect.set(gateway, "nodeSessionOpen", true);
+    Reflect.set(gateway, "operatorSession", session);
+
+    const handleOperatorSessionError = Reflect.get(gateway, "handleOperatorSessionError");
+    if (typeof handleOperatorSessionError !== "function") throw new Error("GatewayDirectTransport.handleOperatorSessionError is unavailable");
+    handleOperatorSessionError.call(gateway, new Error("network blip"), session);
+
+    expect(gateway.readyState).toBe(gateway.CONNECTING);
+    expect(gateway.canSendNodeCommandResult()).toBe(true);
+    expect(Reflect.get(gateway, "operatorSession")).toBeNull();
+    expect(messages).toContainEqual({ type: "error", error: "network blip" });
+    expect(messages).not.toContainEqual(expect.objectContaining({ pauseReconnect: true }));
+  });
+
   it("sends node command results while only the node session is open", async () => {
     const gateway = new GatewayDirectTransport({
       setupCodeOrUrl: "ws://127.0.0.1:18789",
