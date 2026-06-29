@@ -1,6 +1,6 @@
 # Platform Notes
 
-Last reviewed: 2026-06-27.
+Last reviewed: 2026-06-29.
 
 ## Even Hub SDK
 
@@ -204,9 +204,9 @@ app session has ended.
 
 Implementation rules:
 
-- persist setup code/Gateway URL, selected session, voice mode, preferred Review
-  provider, recording limit, node identity, and role-scoped device tokens to
-  browser and Even Hub local storage;
+- persist the normalized Gateway URL, selected session, voice mode, preferred
+  Review provider, recording limit, node identity, and device tokens scoped by
+  Gateway URL and role to browser and Even Hub local storage;
 - expose best-effort `window.__getStateSnapshot()` / `window.__restoreState()`
   hooks for host-managed WebView migration, but do not put Gateway tokens,
   provider credentials, audio buffers, approval payloads, or transcript history

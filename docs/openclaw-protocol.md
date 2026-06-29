@@ -1,6 +1,6 @@
 # OpenClaw Protocol Notes
 
-Last reviewed: 2026-06-27.
+Last reviewed: 2026-06-29.
 
 This note records how OpenClaw Node for Even G2 should use OpenClaw Gateway
 protocol surfaces. It is implementation guidance for this repository, not an
@@ -44,7 +44,8 @@ The app opens two Gateway WebSocket roles with the same local device identity:
 Gateway builds that know the native `openclaw-even-g2-node` client id can
 return both a primary node token and a bounded operator handoff token from one
 setup-code approval. Those handoff tokens arrive in `hello-ok.auth.deviceTokens[]`
-and the app persists them by role.
+and the app persists them by normalized Gateway URL and role so credentials
+from one Gateway are not sent to another Gateway endpoint.
 
 Gateway builds that do not know the native client id may reject the initial
 connect attempt. In that case, the app falls back once to the generic

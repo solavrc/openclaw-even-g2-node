@@ -1,6 +1,6 @@
 # Maintainer Release
 
-Last reviewed: 2026-06-27.
+Last reviewed: 2026-06-29.
 
 This document is a maintainer runbook and Even Hub submission draft. It is not
 the primary user guide.
@@ -129,10 +129,10 @@ Data handling:
   service.
 - Speech provider selection, transcription model, and provider API keys are
   controlled by OpenClaw and are not stored in the Even Hub package.
-- The app stores local settings such as Gateway URL/setup code, token, selected
-  session, and display mode in Even Hub bridge storage, with browser
-  `localStorage` used for local browser and simulator flows, so the next launch
-  can reconnect.
+- The app stores local settings such as normalized Gateway URL, selected
+  session, voice/display settings, and Gateway URL-scoped device tokens in
+  browser `localStorage` and mirrors them to Even Hub bridge storage when
+  available so the next launch can reconnect.
 - The app does not sell data or send analytics to a third-party analytics
   service.
 

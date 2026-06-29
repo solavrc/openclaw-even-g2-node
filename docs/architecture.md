@@ -1,6 +1,6 @@
 # Architecture
 
-Last reviewed: 2026-06-27.
+Last reviewed: 2026-06-29.
 
 ## Shape
 
@@ -33,8 +33,8 @@ The Even Hub client owns:
 - G2 microphone capture through the live Even Hub bridge;
 - compact HUD rendering;
 - phone setup/status UI;
-- local device identity, Gateway setup settings, role-scoped device tokens, and
-  last selected session.
+- local device identity, Gateway setup settings, device tokens scoped by
+  Gateway URL and role, and last selected session.
 
 The client opens two Gateway WebSocket sessions with the same device identity:
 
