@@ -2,6 +2,7 @@ import { spawnSync } from "node:child_process";
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 import { gitMetadata } from "./git-state.ts";
 import {
   assertCaptureLooksVisible,
@@ -174,7 +175,9 @@ export function parseArgs(argv: string[], now = new Date()): ParsedArgs {
 
 export function redactText(value: string) {
   return value
+    .replace(/("(?:token|secret|authorization|apiKey|api_key|auth|bootstrapToken)"\s*:\s*")[^"]*(")/gi, "$1<redacted>$2")
     .replace(/(Bearer\s+)[A-Za-z0-9._~+/=-]+/gi, "$1<redacted>")
+    .replace(/(--(?:token|openclaw-token|password|api-key|apiKey)\s+)[^\s"']+/gi, "$1<redacted>")
     .replace(/((?:setupCode|token|apiKey|api_key|authorization|auth)=)[^&\s"']+/gi, "$1<redacted>")
     .replace(/(wss?:\/\/[^/\s"'@]+:)[^@\s"']+@/gi, "$1<redacted>@");
 }
@@ -551,7 +554,10 @@ async function main() {
   }, null, 2));
 }
 
-main().catch((error) => {
-  console.error(errorStack(error));
-  process.exit(1);
-});
+const invokedPath = process.argv[1] ? pathToFileURL(path.resolve(process.argv[1])).href : "";
+if (import.meta.url === invokedPath) {
+  main().catch((error) => {
+    console.error(errorStack(error));
+    process.exit(1);
+  });
+}

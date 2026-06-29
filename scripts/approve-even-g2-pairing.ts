@@ -1,6 +1,7 @@
 import { execFileSync } from "node:child_process";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
+import { redactText } from "./e2e-agent-review.ts";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -383,13 +384,17 @@ function approveRequest(request: PendingRequest, openclawGlobalArgs: string[], o
   const command = request.kind === "device" ? "devices" : "nodes";
   const args = [...openclawGlobalArgs, command, "approve", request.requestId, "--json", ...openclawArgs];
   try {
-    execFileSync("openclaw", args, { stdio: "inherit" });
+    const stdout = execFileSync("openclaw", args, {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    if (stdout.trim()) process.stdout.write(redactText(stdout));
     return "approved";
   } catch (error) {
     const cause = error as { stdout?: Buffer | string; stderr?: Buffer | string; message?: string };
     const output = `${cause.stdout || ""}\n${cause.stderr || ""}\n${cause.message || ""}`;
     if (/unknown requestId|unknown .*id|not found|expired/i.test(output)) return "stale";
-    throw error;
+    throw new Error(redactText(output.trim()) || "openclaw approval command failed");
   }
 }
 

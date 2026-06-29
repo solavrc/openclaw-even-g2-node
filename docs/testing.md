@@ -265,11 +265,41 @@ pnpm e2e:agent:live -- --node "Even G2" --canvas-text "E2E canvas check"
 ```
 
 For live runs that should not touch the maintainer's everyday Gateway context,
-start a dedicated test Gateway profile and pass that context explicitly. This
-keeps Gateway config, sessions, pairing approvals, and node state out of the
-default OpenClaw profile. The Even G2 platform is not one of OpenClaw's built-in
-mobile platform IDs, so the throwaway Gateway also needs an explicit node
-command allowlist for the canvas commands used by this E2E:
+prefer the isolated wrapper:
+
+```bash
+pnpm e2e:agent:isolated
+```
+
+The wrapper creates a fresh timestamped OpenClaw profile by default, chooses
+free local ports, starts the test Gateway, starts Vite, starts the Even Hub
+simulator with an injected setup code, approves Even G2 device/operator/node
+requests inside the test profile, resolves the currently connected Even G2
+`nodeId`, and finally runs `pnpm e2e:agent:live` against that exact node. This
+avoids stale same-name node ambiguity from previous runs.
+
+Use explicit names or ports only when coordinating multiple local runs:
+
+```bash
+pnpm e2e:agent:isolated -- \
+  --profile eveng2-e2e-manual \
+  --gateway-port 19001 \
+  --app-port 5174 \
+  --simulator-port 9898 \
+  --out-dir /tmp/openclaw-even-g2-e2e-live
+```
+
+The setup code and OpenClaw tokens are not written to the evidence bundle or
+the wrapper's final summary. Command output is redacted before printing. When a
+brand-new profile needs a CLI operator scope upgrade before it can approve the
+Even G2 pairing requests, the wrapper approves that bootstrap request directly
+inside the throwaway profile and then retries the normal Gateway approval flow.
+
+For manual debugging, start a dedicated test Gateway profile and pass that
+context explicitly. This keeps Gateway config, sessions, pairing approvals, and
+node state out of the default OpenClaw profile. The Even G2 platform is not one
+of OpenClaw's built-in mobile platform IDs, so the throwaway Gateway also needs
+an explicit node command allowlist for the canvas commands used by this E2E:
 
 ```bash
 openclaw --profile eveng2-e2e config set gateway.nodes.allowCommands \
@@ -301,8 +331,8 @@ pnpm e2e:agent:live -- \
   --canvas-text "E2E canvas check"
 ```
 
-If a fresh profile's CLI identity asks for additional operator scopes before
-`pnpm device:approve:latest` can call `devices` or `nodes`, approve that
+If a manual fresh profile's CLI identity asks for additional operator scopes
+before `pnpm device:approve:latest` can call `devices` or `nodes`, approve that
 bootstrap request only inside the throwaway profile. Do not switch the repo
 branch or reuse the maintainer's default Gateway state for this step.
 
@@ -321,6 +351,7 @@ OpenClaw command isolation for this flow:
 | Device/operator approval | `pnpm device:approve:latest -- --openclaw-profile eveng2-e2e --url ... --token ...` | Wrapper places profile/container before `devices ...` subcommands and URL/token on Gateway calls. |
 | Node approval | same `pnpm device:approve:latest` run | Wrapper uses the same profile/container and URL/token for `nodes pending/status/approve`. |
 | Node evidence | `pnpm e2e:agent:live -- --openclaw-profile eveng2-e2e --openclaw-url ... --openclaw-token ...` | Harness uses the same profile/container and URL/token for every `nodes invoke`. |
+| Isolated wrapper | `pnpm e2e:agent:isolated` | Runs the full test Gateway, simulator, approval, connected-node resolution, and live evidence flow under a fresh profile by default. |
 | Optional container boundary | add `--openclaw-container <name>` | Container global arg is applied before all OpenClaw subcommands. |
 
 The intended reviewer is the Coding Agent itself, a separate Codex session, or
@@ -520,6 +551,7 @@ failure.
 | `pnpm sim:fixtures` | Simulator / local visual smoke | Starts setup plus fixture simulator runs and checks HUD/WebView screenshots. |
 | `pnpm e2e:agent` | Agentic local review | Collects simulator/OpenClaw evidence and writes a prompt for Coding Agent fuzzy review. |
 | `pnpm e2e:agent:live` | Agentic local review | Same as `e2e:agent`, but also invokes `canvas.present` on the active OpenClaw node. |
+| `pnpm e2e:agent:isolated` | Agentic local review | Starts a fresh test Gateway profile, pairs the simulator, resolves connected nodeId, and runs live evidence collection. |
 | `pnpm run pack` | Packaging | Builds and writes `openclaw-even-g2-node.ehpk`. |
 | `pnpm release:check` | CI / release gate | Runs broad release checks; release status separately reports the runtime Gateway whitelist review risk. |
 | `pnpm release:bundle` | Release artifact | Creates the local release bundle directory and prints the full bundle manifest JSON. |
