@@ -1,0 +1,81 @@
+{
+  "name": "@solavrc/openclaw-even-g2-node",
+  "version": "0.1.17",
+  "private": true,
+  "type": "module",
+  "description": "Even G2 node for OpenClaw.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/solavrc/openclaw-even-g2-node.git"
+  },
+  "bugs": {
+    "url": "https://github.com/solavrc/openclaw-even-g2-node/issues"
+  },
+  "homepage": "https://github.com/solavrc/openclaw-even-g2-node#readme",
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "packageManager": "pnpm@11.2.2+sha512.36e6621fad506178936455e70247b8808ef4ec25797a9f437a93281a020484e2607f6a469a22e982987c3dbb8866e3071514ab10a4a1749e06edcd1ec118436f",
+  "keywords": [
+    "even",
+    "evenrealities",
+    "even-g2",
+    "glasses",
+    "openclaw",
+    "openclaw-even-g2-node"
+  ],
+  "scripts": {
+    "dev": "vite --host 0.0.0.0",
+    "build": "vite build",
+    "pack": "pnpm build && evenhub pack app.json dist -o openclaw-even-g2-node.ehpk",
+    "check": "tsx scripts/source-hygiene-check.ts && pnpm docs:links && tsc -p tsconfig.scripts.json && tsx scripts/check-css-module-types.ts && pnpm typecheck && pnpm test",
+    "ci": "pnpm release:check",
+    "css:types": "tsx scripts/check-css-module-types.ts --write",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "serve:sim": "tsx scripts/sim-static-server.ts",
+    "simulator": "tsx scripts/run-evenhub-simulator.ts",
+    "sim:dev": "pnpm simulator http://127.0.0.1:5174 --automation-port 9898",
+    "sim:run": "pnpm simulator http://127.0.0.1:35162/openclaw-even-g2-node/ --automation-port 9898",
+    "sim:capture": "tsx scripts/evenhub-simulator-capture.ts",
+    "sim:e2e": "tsx scripts/evenhub-simulator-e2e.ts",
+    "sim:fixtures": "tsx scripts/evenhub-simulator-fixtures.ts",
+    "smoke:voice-review": "tsx scripts/evenhub-simulator-voice-review-smoke.ts",
+    "docs:links": "tsx scripts/check-markdown-links.ts",
+    "diag:touch-watch": "tsx scripts/diag-physical-touch-watch.ts",
+    "dev:reset-pairing": "tsx scripts/reset-openclaw-pairing.ts",
+    "device:preview:latest": "tsx scripts/approve-even-g2-pairing.ts --dry-run",
+    "device:approve:latest": "tsx scripts/approve-even-g2-pairing.ts",
+    "version:bump": "tsx scripts/bump-version.ts",
+    "release:screenshots:mark": "tsx scripts/mark-store-screenshots.ts",
+    "release:check": "tsx scripts/release-check.ts",
+    "release:bundle": "tsx scripts/release-bundle.ts",
+    "release:bundle:summary": "tsx scripts/release-bundle.ts --summary",
+    "release:status": "tsx scripts/release-status.ts",
+    "release:status:summary": "tsx scripts/release-status.ts --summary",
+    "audit:all": "pnpm ci && pnpm release:bundle:summary && pnpm release:status:summary"
+  },
+  "dependencies": {
+    "@evenrealities/even_hub_sdk": "^0.0.11",
+    "@noble/ed25519": "^3.1.0",
+    "@noble/hashes": "^2.2.0",
+    "jsqr": "^1.4.0",
+    "react": "^19.2.3",
+    "react-dom": "^19.2.3"
+  },
+  "devDependencies": {
+    "@evenrealities/evenhub-cli": "^0.1.13",
+    "@evenrealities/evenhub-simulator": "^0.7.3",
+    "@types/node": "^24.10.0",
+    "@types/react": "^19.2.17",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^6.0.3",
+    "esbuild": "^0.28.1",
+    "jsdom": "^29.1.1",
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.3",
+    "vite": "^8.1.0",
+    "vitest": "^4.1.9"
+  }
+}
