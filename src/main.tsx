@@ -262,8 +262,10 @@ import {
 import {
   isSimulatorFixtureMode,
   simulatorFixtureBaseState,
+  simulatorFixtureTranscriptForSession,
   simulatorFixtureViewPlan,
   simulatorFixtureModeFromSearch,
+  simulatorSessionSelectorFlowFromSearch,
 } from "./simulator-fixtures";
 import type { SimulatorFixtureMode } from "./simulator-fixtures";
 import {
@@ -287,6 +289,7 @@ import {
 import {
   DEFAULT_VOICE_MODE,
   DEFAULT_VOICE_RECORDING_LIMIT_MS,
+  normalizeVoiceMode,
   normalizeVoiceRecordingLimitSeconds,
   voiceHardStopTimeoutMs,
   voiceCapabilityStatus,
@@ -309,6 +312,9 @@ import "./global.css";
 
 const BACKGROUND_STATE_KEY = "openclaw-even-g2-node";
 const MAX_RECONNECT_DELAY_MS = 15000;
+const E2E_SESSION_MARKER = "[openclaw-even-g2-node:e2e:session]";
+const E2E_VOICE_MARKER = "[openclaw-even-g2-node:e2e:voice]";
+const E2E_APPROVAL_MARKER = "[openclaw-even-g2-node:e2e:approval]";
 function devLog(...args: unknown[]) {
   if (import.meta.env.DEV) globalThis["console"].info(...args);
 }
@@ -323,6 +329,49 @@ function settingsFromUrl() {
 
 function simulatorFixtureMode() {
   return simulatorFixtureModeFromSearch(window.location.search, import.meta.env.DEV);
+}
+
+function simulatorSessionSelectorFlowEnabled() {
+  return simulatorSessionSelectorFlowFromSearch(window.location.search, import.meta.env.DEV);
+}
+
+function e2eDiagnosticsEnabled() {
+  if (!import.meta.env.DEV && !new URLSearchParams(globalThis.location?.search || "").has("e2eLog")) return;
+  return true;
+}
+
+function emitE2eState(marker: string, payload: Record<string, unknown>) {
+  if (!e2eDiagnosticsEnabled()) return;
+  globalThis["console"].info(marker, JSON.stringify({
+    emittedAt: new Date().toISOString(),
+    ...payload,
+  }));
+}
+
+function emitE2eSessionState(payload: Record<string, unknown>) {
+  emitE2eState(E2E_SESSION_MARKER, payload);
+}
+
+function emitE2eVoiceState(payload: Record<string, unknown>) {
+  emitE2eState(E2E_VOICE_MARKER, payload);
+}
+
+function emitE2eApprovalState(payload: Record<string, unknown>) {
+  emitE2eState(E2E_APPROVAL_MARKER, payload);
+}
+
+function e2eVoiceModeFromSearch(search: string) {
+  if (!e2eDiagnosticsEnabled()) return "";
+  const mode = new URLSearchParams(search).get("e2eVoiceMode") || "";
+  return normalizeVoiceMode(mode) || "";
+}
+
+function parseJsonObject(text: string): unknown | null {
+  try {
+    return JSON.parse(text) as unknown;
+  } catch {
+    return null;
+  }
 }
 
 function arrayBufferBackedBytes(bytes: Uint8Array): Uint8Array<ArrayBuffer> {
@@ -389,6 +438,7 @@ type CanvasMessageKind = Extract<CanvasPresentationKind, "message" | "notificati
 
 export function App() {
   const initial = useMemo(loadSettings, []);
+  const initialE2eVoiceMode = useMemo(() => e2eVoiceModeFromSearch(window.location.search), []);
   const shouldProcessLifecycleAction = useMemo(() => createEvenHubLifecycleDedupe(), []);
   const [gatewayUrl, setGatewayUrl] = useState(initial.gatewayUrl);
   const [setupCodeDraft, setSetupCodeDraft] = useState(initial.gatewayUrl);
@@ -405,7 +455,7 @@ export function App() {
   const [sessionTranscript, setSessionTranscript] = useState<SessionTranscriptMessage[]>([]);
   const [sessionTranscriptError, setSessionTranscriptError] = useState("");
   const [glassView, setGlassView] = useState<GlassView>("sessionHome");
-  const [voiceMode, setVoiceMode] = useState<VoiceMode>(initial.voiceMode || DEFAULT_VOICE_MODE);
+  const [voiceMode, setVoiceMode] = useState<VoiceMode>(initialE2eVoiceMode || initial.voiceMode || DEFAULT_VOICE_MODE);
   const [preferredReviewProvider, setPreferredReviewProvider] = useState(initial.preferredReviewProvider || "");
   const [voiceRecordingLimitSeconds, setVoiceRecordingLimitSeconds] = useState(
     normalizeVoiceRecordingLimitSeconds(initial.voiceRecordingLimitSeconds),
@@ -457,7 +507,7 @@ export function App() {
   const gatewayUrlRef = useRef(initial.gatewayUrl);
   const sessionKeyRef = useRef(initial.selectedSessionKey || "");
   const lastSeenNodeIdRef = useRef(initial.lastSeenNodeId || "");
-  const voiceModeRef = useRef<VoiceMode>(initial.voiceMode || DEFAULT_VOICE_MODE);
+  const voiceModeRef = useRef<VoiceMode>(initialE2eVoiceMode || initial.voiceMode || DEFAULT_VOICE_MODE);
   const preferredReviewProviderRef = useRef(initial.preferredReviewProvider || "");
   const voiceRecordingLimitSecondsRef = useRef(normalizeVoiceRecordingLimitSeconds(initial.voiceRecordingLimitSeconds));
   const talkReviewStatusRef = useRef<TalkCatalogReviewStatus>(unknownTalkCatalogReviewStatus());
@@ -472,6 +522,7 @@ export function App() {
   const sessionTranscriptHasFullHistoryRef = useRef(false);
   const sessionTranscriptLoadingLimitRef = useRef<number | null>(null);
   const sessionTranscriptRequestedSessionKeyRef = useRef("");
+  const simulatorSessionSelectorFlowRanRef = useRef(false);
   const pendingHistoryExpandRef = useRef<{ sessionKey: string; limit: number } | null>(null);
   const canvasTextRef = useRef("");
   const canvasModeRef = useRef<CanvasMode>("text");
@@ -600,6 +651,11 @@ export function App() {
   }
 
   function setActiveVoiceListening() {
+    emitE2eVoiceState({
+      action: "voice-listening",
+      mode: pendingSessionVoiceRef.current?.mode || voiceModeRef.current,
+      sessionKey: pendingSessionVoiceRef.current?.targetSessionKey || sessionKeyRef.current,
+    });
     setActiveListening(true);
     setActiveGlassView("listening");
     setStatus("voice: listening");
@@ -876,6 +932,7 @@ export function App() {
     sessionTranscriptLoadingLimitRef.current = requestedLimit;
     sessionTranscriptRequestedSessionKeyRef.current = nextSessionKey;
     if (options.expand) pendingHistoryExpandRef.current = { sessionKey: nextSessionKey, limit: requestedLimit };
+    emitE2eSessionState({ action: "request-transcript", sessionKey: nextSessionKey, limit: requestedLimit });
     sendGatewayOutboxRequest(ws, gatewaySessionTranscriptGetRequest(nextSessionKey, requestedLimit));
   }
 
@@ -1140,14 +1197,59 @@ export function App() {
 
   function installSimulatorGatewayTransport() {
     const fixtureGatewayEvents = new EventTarget();
-    wsRef.current = {
+    let transport: GatewayTransport;
+    const emitFixtureGatewayMessage = (message: GatewayMessage) => window.setTimeout(() => handleGatewayMessage(transport, message), 0);
+    transport = {
       readyState: WebSocket.OPEN,
       addEventListener: fixtureGatewayEvents.addEventListener.bind(fixtureGatewayEvents),
       close: () => undefined,
       send: (data: string) => {
         devLog("[OpenClaw Node] simulator fixture gateway send", data);
+        const request = parseJsonObject(data);
+        if (!request || typeof request !== "object" || Array.isArray(request)) return;
+        const record = request as Record<string, unknown>;
+        const type = typeof record.type === "string" ? record.type : "";
+        emitE2eSessionState({ action: "gateway-send", type, sessionKey: record.sessionKey });
+        if (type === "eveng2.session.config.get") {
+          emitFixtureGatewayMessage({ type: "eveng2.session.config.snapshot", sessionKey: sessionKeyRef.current });
+        } else if (type === "eveng2.session.list") {
+          emitFixtureGatewayMessage({ type: "eveng2.session.list.result", sessions: rawSessionsRef.current });
+        } else if (type === "eveng2.session.switch") {
+          const nextSessionKey = typeof record.sessionKey === "string" ? record.sessionKey : "";
+          if (!nextSessionKey) return;
+          emitFixtureGatewayMessage({ type: "eveng2.session.switch.applied", sessionKey: nextSessionKey });
+        } else if (type === "eveng2.session.transcript.get") {
+          const requestedSessionKey = typeof record.sessionKey === "string" ? record.sessionKey : sessionKeyRef.current;
+          emitFixtureGatewayMessage({
+            type: "eveng2.session.transcript.snapshot",
+            sessionKey: requestedSessionKey,
+            sessionId: requestedSessionKey,
+            messages: simulatorFixtureTranscriptForSession(requestedSessionKey),
+            rawLimit: typeof record.limit === "number" ? record.limit : SESSION_TRANSCRIPT_INITIAL_RAW_LIMIT,
+            rawCount: simulatorFixtureTranscriptForSession(requestedSessionKey).length,
+            hasFullHistory: true,
+          });
+        } else if (type === "eveng2.approval.resolve") {
+          const id = typeof record.id === "string" ? record.id : "";
+          const requestId = typeof record.requestId === "string" ? record.requestId : "";
+          const decision = typeof record.decision === "string" ? record.decision : null;
+          emitFixtureGatewayMessage({
+            type: "eveng2.approval.resolve.ack",
+            id,
+            requestId,
+            decision,
+            status: "accepted",
+          });
+          emitFixtureGatewayMessage({
+            type: "eveng2.approval.resolved",
+            id,
+            requestId,
+            decision,
+          });
+        }
       },
     };
+    wsRef.current = transport;
   }
 
   function applySimulatorBaseState(fixtureMode: SimulatorFixtureMode) {
@@ -1312,6 +1414,12 @@ export function App() {
     }
     appendOptimisticUserMessage(sessionKey, message, idempotencyKey);
     setStatus("voice: sending to session");
+    emitE2eVoiceState({
+      action: "send-voice-draft",
+      mode: "review",
+      sessionKey,
+      textLength: message.length,
+    });
     sendGatewayOutboxRequest(ws, gatewaySessionSendRequest(sessionKey, message, idempotencyKey));
     renderGlassSessionHome("voice submitted", { force: true });
   }
@@ -1323,10 +1431,21 @@ export function App() {
       return;
     }
     setActiveVoiceDraft(null);
+    emitE2eVoiceState({
+      action: "confirm-voice-draft",
+      mode: "review",
+      sessionKey: draft.targetSessionKey,
+      textLength: draft.text.length,
+    });
     sendVoiceTextToSession(draft.text, draft.targetSessionKey, draft.idempotencyKey);
   }
 
   function discardCurrentVoiceDraft() {
+    emitE2eVoiceState({
+      action: "discard-voice-draft",
+      mode: "review",
+      sessionKey: voiceDraftRef.current?.targetSessionKey,
+    });
     setActiveVoiceDraft(null);
     setStatus("voice transcript discarded");
     renderGlassSessionHome("ready", { force: true });
@@ -1885,6 +2004,7 @@ export function App() {
     switch (msg.type) {
       case "eveng2.session.config.snapshot":
       case "eveng2.session.switch.applied": {
+        emitE2eSessionState({ action: msg.type, sessionKey: msg.sessionKey });
         const update = sessionConfigOrSwitchUpdate(msg, sessionKeyRef.current);
         if (update.nextSessionKey) {
           setActiveSessionKey(update.nextSessionKey);
@@ -1903,6 +2023,7 @@ export function App() {
         void renderGlass(formatGlassSessionCreateFailedFrame(msg.error));
         return;
       case "eveng2.session.list.result":
+        emitE2eSessionState({ action: "session-list-result", count: msg.sessions?.length || 0 });
         handleGatewaySessionListResult(ws, msg);
         return;
       case "eveng2.session.transcript.snapshot":
@@ -1934,6 +2055,11 @@ export function App() {
   ) {
     if (msg.sessionKey && msg.sessionKey !== sessionKeyRef.current) return;
     if (!msg.sessionKey && sessionTranscriptRequestedSessionKeyRef.current && sessionTranscriptRequestedSessionKeyRef.current !== sessionKeyRef.current) return;
+    emitE2eSessionState({
+      action: "transcript-snapshot",
+      sessionKey: msg.sessionKey,
+      count: msg.messages?.length || 0,
+    });
     const update = sessionTranscriptSnapshotUpdate({
       snapshot: msg,
       loadingLimit: sessionTranscriptLoadingLimitRef.current,
@@ -1984,6 +2110,13 @@ export function App() {
   }
 
   function handleGatewayApprovalMessage(msg: GatewayApprovalMessage) {
+    emitE2eApprovalState({
+      action: msg.type,
+      id: msg.id,
+      requestId: msg.requestId,
+      decision: "decision" in msg ? msg.decision : undefined,
+      status: "status" in msg ? msg.status : undefined,
+    });
     const update = gatewayApprovalUpdate(msg, pendingApprovalRef.current);
     if (update.action === "request") {
       setActivePendingApproval(update.pendingApproval);
@@ -2358,12 +2491,14 @@ export function App() {
   function refreshSessions() {
     const ws = wsRef.current;
     if (!ws || !isGatewayTransportOpen(ws.readyState, WebSocket.OPEN)) return;
+    emitE2eSessionState({ action: "refresh-sessions", sessionKey: sessionKeyRef.current });
     sendGatewaySessionBootstrapRequests(ws);
     requestSessionTranscript(sessionKeyRef.current, { force: true });
   }
 
   function switchSession(nextSessionKey: string) {
     if (!nextSessionKey || nextSessionKey === sessionKey) return;
+    emitE2eSessionState({ action: "switch-session", fromSessionKey: sessionKeyRef.current, toSessionKey: nextSessionKey });
     applyActiveSessionSelection(nextSessionKey, { resetTranscript: true });
     if (!requestGatewaySessionSwitch(nextSessionKey)) return;
     setStatus("selected session");
@@ -2375,6 +2510,12 @@ export function App() {
     if (!approval) return;
     const ws = wsRef.current;
     if (!ws || !isGatewayTransportOpen(ws.readyState, WebSocket.OPEN)) return;
+    emitE2eApprovalState({
+      action: "resolve-approval",
+      decision,
+      id: approval.id,
+      requestId: approval.requestId,
+    });
     sendGatewayOutboxRequest(ws, gatewayApprovalResolveRequest(approval, decision));
     setStatus("approval sent");
     void renderGlass(formatGlassApprovalDecisionFrame(decision));
@@ -2474,6 +2615,12 @@ export function App() {
     const pendingSessionVoice = pendingSessionVoiceRef.current;
     if (pendingSessionVoice?.mode !== "review") return;
     const phase = voiceDraftPendingPhaseFromGatewayPayload(payload);
+    emitE2eVoiceState({
+      action: "voice-processing",
+      mode: pendingSessionVoice.mode,
+      phase,
+      sessionKey: pendingSessionVoice.targetSessionKey,
+    });
     setActiveVoiceDraftPendingPhase(phase);
     setStatus(`voice: ${phase}`);
     renderGlassVoiceDraftPending(phase);
@@ -2494,6 +2641,12 @@ export function App() {
       return;
     }
     if (!plan.draft) return;
+    emitE2eVoiceState({
+      action: "voice-draft-ready",
+      mode: pendingSessionVoice?.mode || voiceModeRef.current,
+      sessionKey: plan.draft.targetSessionKey,
+      textLength: plan.draft.text.length,
+    });
     setActiveVoiceDraft(plan.draft);
     setLastVoiceFailure(null);
     setStatus(plan.status);
@@ -2538,6 +2691,12 @@ export function App() {
         plan.optimisticUserMessage.idempotencyKey,
       );
     }
+    emitE2eVoiceState({
+      action: "session-voice-sent",
+      mode: pendingSessionVoice?.mode || voiceModeRef.current,
+      sessionKey: plan.sent.sessionKey,
+      idempotencyKey: plan.sent.idempotencyKey,
+    });
     setLastVoiceFailure(null);
     setStatus(plan.status);
     requestSessionTranscript(plan.sent.sessionKey);
@@ -2558,6 +2717,13 @@ export function App() {
       pendingSessionVoice,
     });
     if (plan.nextText) updateVoiceText(plan.nextText);
+    if (plan.nextText) {
+      emitE2eVoiceState({
+        action: plan.isFinal ? "transcript-final" : "transcript-partial",
+        mode: pendingSessionVoice?.mode || voiceModeRef.current,
+        textLength: plan.nextText.length,
+      });
+    }
     if (!plan.isFinal) return;
     clearVoiceRecordingPulseTimer();
     if (plan.nodeCommandResult) {
@@ -2647,6 +2813,11 @@ export function App() {
 
   function cancelVoiceInput() {
     const hadPendingSessionVoice = Boolean(pendingSessionVoiceRef.current);
+    emitE2eVoiceState({
+      action: "cancel-voice",
+      hadPendingSessionVoice,
+      mode: pendingSessionVoiceRef.current?.mode || voiceModeRef.current,
+    });
     setActiveVoiceDraft(null);
     setActiveVoiceDraftPendingPhase("preprocess");
     resetVoiceTranscript();
@@ -2789,6 +2960,11 @@ export function App() {
       ? voiceTransportCloseAction(voiceWs.readyState, { open: WebSocket.OPEN, closing: WebSocket.CLOSING })
       : "none";
     if (voiceWs && closeAction === "finalize") {
+      emitE2eVoiceState({
+        action: "finalize-voice",
+        mode: pendingSessionVoiceRef.current?.mode || voiceModeRef.current,
+        sessionKey: pendingSessionVoiceRef.current?.targetSessionKey || sessionKeyRef.current,
+      });
       sendGatewayOutboxRequest(voiceWs, gatewayUtteranceFinalizeRequest());
       voiceFinalizeCloseTimerRef.current = window.setTimeout(() => {
         voiceFinalizeCloseTimerRef.current = null;
@@ -2829,6 +3005,12 @@ export function App() {
       setStatus("voice: opening microphone");
       resetVoiceTranscript();
       setPendingVoiceStart(options);
+      emitE2eVoiceState({
+        action: "start-voice",
+        mode: options.sessionVoice?.mode || voiceModeRef.current,
+        sessionKey: options.sessionVoice?.targetSessionKey || sessionKeyRef.current,
+        hasNodeCommand: Boolean(options.nodeCommandId),
+      });
       const bridge = bridgeRef.current;
       if (bridge) {
         const started = await startBridgeVoice(bridge);
@@ -2908,6 +3090,34 @@ export function App() {
   const diagnosticsNodeId = nodeSnapshot?.nodeId || lastSeenNodeId;
   const diagnosticsNodeApprovalState = nodeApprovalStatus?.approvalState || nodeSnapshot?.approvalState || "";
   const diagnosticsNodePendingRequestId = nodeApprovalStatus?.requestId || nodeSnapshot?.pendingRequestId || "";
+
+  useEffect(() => {
+    if (!simulatorSessionSelectorFlowEnabled() || simulatorSessionSelectorFlowRanRef.current) return;
+    if (!connected || sessionSelectOptions.length < 2) return;
+    const targetSession = sessionSelectOptions.find((session) => session.key !== sessionKey);
+    if (!targetSession) return;
+    simulatorSessionSelectorFlowRanRef.current = true;
+    window.setTimeout(() => {
+      const select = document.querySelector('[aria-label="Selected OpenClaw session"]') as HTMLSelectElement | null;
+      if (!select) {
+        emitE2eSessionState({ action: "selector-flow-missing" });
+        return;
+      }
+      emitE2eSessionState({
+        action: "selector-flow-start",
+        fromSessionKey: sessionKeyRef.current,
+        toSessionKey: targetSession.key,
+      });
+      select.dispatchEvent(new FocusEvent("focus", { bubbles: true }));
+      select.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+      Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value")?.set?.call(select, targetSession.key);
+      select.dispatchEvent(new Event("change", { bubbles: true }));
+      emitE2eSessionState({
+        action: "selector-flow-change-dispatched",
+        toSessionKey: targetSession.key,
+      });
+    }, 500);
+  }, [connected, sessionKey, sessionSelectOptions]);
 
   return (
     <main className={styles.appShell}>

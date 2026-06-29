@@ -1,6 +1,6 @@
 # Testing
 
-Last reviewed: 2026-06-27.
+Last reviewed: 2026-06-29.
 
 Use the cheapest layer that covers the change. The simulator is useful for HUD
 layout and event logic, but it is not hardware emulation.
@@ -115,6 +115,10 @@ and then selects the flow from the current HUD density:
 - setup-like HUD: verifies first-run setup visibility;
 - session-like HUD: verifies selected-session visibility. Session switching is
   owned by the phone Session selector, not by a glasses session picker.
+- `sessionSelector` flow: with the dev fixture flag below, exercises the phone
+  Session selector by dispatching real focus/mousedown/change events, verifies
+  the app sent refresh/switch/transcript Gateway requests, then captures the
+  switched glasses/phone state.
 
 Force a mode when needed:
 
@@ -122,6 +126,7 @@ Force a mode when needed:
 EVENG2_SIM_FLOW=setup pnpm sim:e2e
 EVENG2_SIM_FLOW=session pnpm sim:e2e
 EVENG2_SIM_FLOW=voiceReview pnpm sim:e2e
+EVENG2_SIM_FLOW=sendNow pnpm sim:e2e
 EVENG2_SIM_FLOW=canvas pnpm sim:e2e
 EVENG2_SIM_FLOW=approval pnpm sim:e2e
 EVENG2_SIM_FLOW=recovery pnpm sim:e2e
@@ -203,6 +208,21 @@ Useful tuning variables:
 - `EVENG2_VOICE_RECORD_MS` (default `10000`)
 - `EVENG2_VOICE_FINAL_LIT_PIXELS` (default `4500`)
 
+To test the real `Send now` path against a running simulator, paired Even G2
+node, OpenClaw Gateway, microphone, and a selected session that can accept audio
+attachments, start the app with direct voice mode and run:
+
+```bash
+pnpm simulator 'http://127.0.0.1:5174/?resetPairing=1&e2eLog=1&e2eVoiceMode=direct' --automation-port 9898
+pnpm smoke:send-now
+```
+
+The smoke starts recording from the glasses, stops after the configured record
+window, waits for the app's `session-voice-sent` evidence marker, and fails if
+the marker is not direct-mode evidence. This proves the app/Gateway path reached
+the `chat.send` WAV attachment acknowledgement; the selected Agent's later
+media understanding is still OpenClaw-owned behavior.
+
 To run the setup smoke and every dev-only fixture without manually switching
 simulator URLs:
 
@@ -212,12 +232,99 @@ pnpm sim:fixtures
 
 `sim:fixtures` starts and stops the required local app servers and Even Hub
 simulator processes. It builds the app first, then covers setup, session
-navigation, review-before-send, canvas, approval, and recovery fixture HUDs.
-It also writes `.openclaw-even-g2-node/simulator-fixtures-report.json` for local
-debugging. The report is written on both pass and failure and is Git-ignored.
-Treat it as optional visual-smoke context, not release evidence: app permissions,
-packaged runtime behavior, OpenClaw state, and real glasses behavior still need
-the appropriate private/beta build checks.
+navigation, review-before-send, Send now, canvas, approval, and recovery fixture HUDs. For
+interactive fixture states it also drives representative glasses input events:
+session `up`/`down`, Review `tap send`, canvas `tap hide`, approval rerender and
+`tap allow`, tutorial skip, and Send now cancellation. It writes
+`.openclaw-even-g2-node/simulator-fixtures-report.json` for local debugging. The
+report is written on both pass and failure and is Git-ignored. Treat it as
+optional visual-smoke context, not release evidence: app permissions, packaged
+runtime behavior, OpenClaw state, and real glasses behavior still need the
+appropriate private/beta build checks.
+
+## Agentic E2E Review
+
+For Coding Agent development loops, use an evidence bundle instead of a brittle
+pixel-perfect assertion. The goal is to let the agent compare simulator output,
+OpenClaw node state, and [user-stories.md](user-stories.md) with fuzzy product
+judgment.
+
+Start the app and simulator as usual. For production-build simulator runs where
+the agent needs structured HUD state logs, add `?e2eLog=1` to the app URL:
+
+```bash
+pnpm build
+pnpm serve:sim
+pnpm simulator 'http://127.0.0.1:35162/openclaw-even-g2-node/?e2eLog=1' --automation-port 9898
+pnpm e2e:agent
+```
+
+`pnpm e2e:agent` writes a run directory under
+`.openclaw-even-g2-node/e2e-agent-runs/` containing:
+
+- a snapshot of `docs/user-stories.md`;
+- simulator glasses and phone WebView screenshots;
+- simulator console logs and structured glass/session/voice/approval state
+  markers when available;
+- OpenClaw `nodes status` and `canvas.snapshot` command evidence when the
+  local `openclaw` CLI can reach the active Gateway;
+- `review-prompt.md`, which tells the Coding Agent how to judge the run;
+- `llm-review.schema.md`, which fixes the expected fuzzy-review shape and
+  verdict meanings;
+- `llm-review.template.json`, which the Coding Agent can replace with its
+  structured verdict.
+
+To include a live OpenClaw node display mutation, run:
+
+```bash
+pnpm e2e:agent:live
+```
+
+This also invokes `canvas.present` on the configured Even G2 node before reading
+`canvas.snapshot`. Override the node or text when needed:
+
+```bash
+pnpm e2e:agent:live -- --node "Even G2" --canvas-text "E2E canvas check"
+```
+
+For live runs against an already-running local Gateway, start the app and
+simulator, pair and approve the Even G2 node, resolve the connected `nodeId`,
+then pass that exact node to the evidence command:
+
+```bash
+pnpm dev
+pnpm simulator 'http://127.0.0.1:5174/?resetPairing=1&e2eLog=1&setupCode=<setup-code>' \
+  --automation-port 9898
+pnpm device:approve:latest -- --watch-ms 45000
+openclaw nodes status --json
+pnpm e2e:agent:live -- \
+  --simulator-url http://127.0.0.1:9898 \
+  --node "<connected Even G2 nodeId>" \
+  --canvas-text "E2E canvas check"
+```
+
+The E2E bundle records the OpenClaw profile, URL, and whether a token was
+provided. Token values are redacted from command evidence and manifests.
+
+The intended reviewer is the Coding Agent itself, a separate Codex session, or
+an OpenClaw-routed agent. The reviewer should return `pass`, `warn`, `fail`, or
+`inconclusive` per story. It should treat missing evidence as inconclusive,
+judge semantic user-story fit rather than exact wording, and fail regressions
+where the phone becomes the primary chat surface or provider/Gateway ownership
+moves into the app.
+
+After writing `llm-review.json`, validate the shape before treating it as
+review evidence:
+
+```bash
+pnpm e2e:agent:review:validate -- .openclaw-even-g2-node/e2e-agent-runs/<run-id>
+```
+
+The validator requires exactly one review for each `story-1` through `story-8`,
+confidence values from `0` to `1`, string arrays for evidence/concerns/fixes,
+and one of `pass`, `warn`, `fail`, or `inconclusive` for every verdict. Use
+`warn` when observed behavior looks aligned but the evidence scope is incomplete;
+reserve `fail` for observed behavior that contradicts `docs/user-stories.md`.
 
 There is also a manual GitHub Actions workflow, `Simulator Fixtures`, that runs
 the same command under `xvfb-run` and uploads the fixture report plus captured
@@ -237,8 +344,15 @@ pnpm simulator 'http://127.0.0.1:5174/?resetPairing=1&simFixture=session' --auto
 EVENG2_SIM_FLOW=session pnpm sim:e2e
 ```
 
-Replace `session` with `voiceReview`, `canvas`, `canvasTutorial`, `approval`,
-`recovery`, `storeChat`, or `storeVoice` to run a visual smoke against those
+To cover Story 3's phone selector path locally:
+
+```bash
+pnpm simulator 'http://127.0.0.1:5174/?resetPairing=1&simFixture=session&simSessionSelectorFlow=1' --automation-port 9898
+EVENG2_SIM_FLOW=sessionSelector pnpm sim:e2e
+```
+
+Replace `session` with `voiceReview`, `sendNow`, `canvas`, `canvasTutorial`,
+`approval`, `recovery`, `storeChat`, or `storeVoice` to run a visual smoke against those
 fixture states. The
 non-session fixture flows capture the HUD and phone WebView and verify that the
 rendered output is visible; the `session` flow verifies selected-session HUD
@@ -249,6 +363,7 @@ sample states so HUD behavior can be tested without private OpenClaw state:
 
 - `simFixture=session`: selected-session view;
 - `simFixture=voiceReview`: review-before-send transcript screen;
+- `simFixture=sendNow`: direct Send now recording screen;
 - `simFixture=canvas`: `canvas.present` pushed text screen;
 - `simFixture=canvasTutorial`: first-run canvas tutorial sequence with image
   frames followed by the OpenClaw request prompt;
@@ -296,6 +411,7 @@ http://127.0.0.1:5174/?resetPairing=1&disableEvenBridge=1&setupCode=wss%3A%2F%2F
 http://127.0.0.1:5174/?resetPairing=1&disableEvenBridge=1&setupCode=wss%3A%2F%2Fgateway.example%2Fws&openPanel=diagnostics
 http://127.0.0.1:5174/?resetPairing=1&simFixture=session
 http://127.0.0.1:5174/?resetPairing=1&simFixture=voiceReview&openPanel=voice
+http://127.0.0.1:5174/?resetPairing=1&simFixture=sendNow&openPanel=voice
 http://127.0.0.1:5174/?resetPairing=1&simFixture=canvasTutorial
 http://127.0.0.1:5174/?resetPairing=1&simFixture=storeChat
 http://127.0.0.1:5174/?resetPairing=1&simFixture=storeVoice
@@ -407,6 +523,9 @@ failure.
 | `pnpm sim:run` | Simulator | Starts official simulator against the local static URL. |
 | `pnpm sim:capture` | Simulator | Requires simulator automation server. |
 | `pnpm sim:fixtures` | Simulator / local visual smoke | Starts setup plus fixture simulator runs and checks HUD/WebView screenshots. |
+| `pnpm e2e:agent` | Agentic local review | Collects simulator/OpenClaw evidence and writes a prompt for Coding Agent fuzzy review. |
+| `pnpm e2e:agent:live` | Agentic local review | Same as `e2e:agent`, but also invokes `canvas.present` on the active OpenClaw node. |
+| `pnpm e2e:agent:review:validate` | Agentic local review | Validates `llm-review.json` against the required fuzzy-review schema. |
 | `pnpm run pack` | Packaging | Builds and writes `openclaw-even-g2-node.ehpk`. |
 | `pnpm release:check` | CI / release gate | Runs broad release checks; release status separately reports the runtime Gateway whitelist review risk. |
 | `pnpm release:bundle` | Release artifact | Creates the local release bundle directory and prints the full bundle manifest JSON. |

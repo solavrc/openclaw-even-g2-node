@@ -8,9 +8,9 @@ import { fetchSimulator } from "./simulator-utils.ts";
 import { simulatorSourceSha256 } from "./simulator-source-fingerprint.ts";
 import { errorStack } from "./strict-helpers.ts";
 
-type FixtureFlow = "session" | "voiceReview" | "canvas" | "canvasTutorial" | "approval" | "recovery" | "storeChat" | "storeVoice";
+type FixtureFlow = "session" | "voiceReview" | "canvas" | "canvasTutorial" | "approval" | "recovery" | "storeChat" | "storeVoice" | "sendNow";
 
-const FIXTURE_FLOWS: FixtureFlow[] = ["session", "voiceReview", "canvas", "canvasTutorial", "approval", "recovery", "storeChat", "storeVoice"];
+const FIXTURE_FLOWS: FixtureFlow[] = ["session", "voiceReview", "canvas", "canvasTutorial", "approval", "recovery", "storeChat", "storeVoice", "sendNow"];
 const OUT_DIR = process.env.EVENG2_SIMULATOR_OUT_DIR || "/tmp";
 const REPORT_PATH = path.join(process.cwd(), ".openclaw-even-g2-node", "simulator-fixtures-report.json");
 

@@ -1,6 +1,7 @@
 import { execFileSync } from "node:child_process";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
+import { redactText } from "./e2e-agent-review.ts";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -8,7 +9,9 @@ type ParsedArgs = {
   allowNonEvenG2: boolean;
   dryRun: boolean;
   openclawArgs: string[];
+  openclawGlobalArgs: string[];
   pollMs: number;
+  settleMs: number;
   watchMs: number | null;
 };
 
@@ -37,6 +40,7 @@ type PendingRequest = {
 
 const DEFAULT_WATCH_MS = 30_000;
 const DEFAULT_POLL_MS = 750;
+const DEFAULT_SETTLE_MS = 8_000;
 const EVEN_G2_NODE_CAPS = new Set(["canvas", "talk"]);
 const EVEN_G2_NODE_COMMANDS = new Set([
   "canvas.hide",
@@ -56,12 +60,19 @@ Usage:
   pnpm device:approve:latest
   pnpm device:preview:latest
   pnpm device:approve:latest -- --watch-ms 45000
+  pnpm device:approve:latest -- --openclaw-container <container>
+  pnpm device:approve:latest -- --openclaw-profile <profile>
   pnpm device:approve:latest -- --url <gateway-ws-url> --token <gateway-token>
 
 Options handled by this wrapper:
   --dry-run             Print the actions without approving.
   --watch-ms <ms>       Watch duration. Default: ${DEFAULT_WATCH_MS}ms for approve, one pass for dry-run.
   --poll-ms <ms>        Poll interval while watching. Default: ${DEFAULT_POLL_MS}ms.
+  --settle-ms <ms>      After approving at least one request, stop once no new Even G2 request appears for this long. Default: ${DEFAULT_SETTLE_MS}ms.
+  --openclaw-container <name>
+                        Run OpenClaw CLI calls through this container.
+  --openclaw-profile <name>
+                        Run OpenClaw CLI calls with this profile.
   --allow-non-even-g2   Allow approving a newest device request that does not look like Even G2.
   -h, --help            Show this help.
 
@@ -92,13 +103,17 @@ function readNumber(value: string, flag: string): number {
 
 export function parseArgs(argv: string[]): ParsedArgs {
   const openclawArgs: string[] = [];
+  const openclawGlobalArgs: string[] = [];
   let allowNonEvenG2 = false;
   let dryRun = false;
   let watchMs: number | null = null;
   let pollMs = DEFAULT_POLL_MS;
+  let settleMs = DEFAULT_SETTLE_MS;
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
-    if (arg === "--allow-non-even-g2") {
+    if (arg === "--") {
+      continue;
+    } else if (arg === "--allow-non-even-g2") {
       allowNonEvenG2 = true;
     } else if (arg === "--dry-run") {
       dryRun = true;
@@ -112,6 +127,21 @@ export function parseArgs(argv: string[]): ParsedArgs {
       if (!value) throw new Error("--poll-ms requires a value.");
       pollMs = Math.max(100, readNumber(value, "--poll-ms"));
       index += 1;
+    } else if (arg === "--settle-ms") {
+      const value = argv[index + 1];
+      if (!value) throw new Error("--settle-ms requires a value.");
+      settleMs = readNumber(value, "--settle-ms");
+      index += 1;
+    } else if (arg === "--openclaw-container") {
+      const value = argv[index + 1];
+      if (!value) throw new Error("--openclaw-container requires a value.");
+      openclawGlobalArgs.push("--container", value);
+      index += 1;
+    } else if (arg === "--openclaw-profile") {
+      const value = argv[index + 1];
+      if (!value) throw new Error("--openclaw-profile requires a value.");
+      openclawGlobalArgs.push("--profile", value);
+      index += 1;
     } else if (arg === "-h" || arg === "--help") {
       console.log(HELP);
       process.exit(0);
@@ -123,12 +153,12 @@ export function parseArgs(argv: string[]): ParsedArgs {
       openclawArgs.push(arg);
     }
   }
-  return { allowNonEvenG2, dryRun, openclawArgs, pollMs, watchMs };
+  return { allowNonEvenG2, dryRun, openclawArgs, openclawGlobalArgs, pollMs, settleMs, watchMs };
 }
 
-function runOpenClaw(commandArgs: string[], allowExitOne = false): CommandResult {
+function runOpenClaw(openclawGlobalArgs: string[], commandArgs: string[], allowExitOne = false): CommandResult {
   try {
-    const stdout = execFileSync("openclaw", commandArgs, {
+    const stdout = execFileSync("openclaw", [...openclawGlobalArgs, ...commandArgs], {
       encoding: "utf8",
       stdio: ["ignore", "pipe", "pipe"],
     });
@@ -337,45 +367,60 @@ function sleep(ms: number): void {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 }
 
-function previewLatestDevice(openclawArgs: string[]): PendingRequest | null {
-  const result = runOpenClaw(["devices", "approve", "--latest", "--json", ...openclawArgs], true);
+function previewLatestDevice(openclawGlobalArgs: string[], openclawArgs: string[]): PendingRequest | null {
+  const result = runOpenClaw(openclawGlobalArgs, ["devices", "approve", "--latest", "--json", ...openclawArgs], true);
   return parseDevicePreview(`${result.stdout}\n${result.stderr}`);
 }
 
-function listPendingDevices(openclawArgs: string[]): PendingRequest[] {
-  const result = runOpenClaw(["devices", "list", "--json", ...openclawArgs], true);
+function listPendingDevices(openclawGlobalArgs: string[], openclawArgs: string[]): PendingRequest[] {
+  const result = runOpenClaw(openclawGlobalArgs, ["devices", "list", "--json", ...openclawArgs], true);
   const listed = parseDevicePendingList(result.stdout);
   if (listed.length > 0) return listed;
-  const preview = previewLatestDevice(openclawArgs);
+  const preview = previewLatestDevice(openclawGlobalArgs, openclawArgs);
   return preview ? [preview] : [];
 }
 
-function listPendingNodes(openclawArgs: string[]): PendingRequest[] {
-  const pendingResult = runOpenClaw(["nodes", "pending", "--json", ...openclawArgs], true);
-  const statusResult = runOpenClaw(["nodes", "status", "--json", ...openclawArgs], true);
+function listPendingNodes(openclawGlobalArgs: string[], openclawArgs: string[]): PendingRequest[] {
+  const pendingResult = runOpenClaw(openclawGlobalArgs, ["nodes", "pending", "--json", ...openclawArgs], true);
+  const statusResult = runOpenClaw(openclawGlobalArgs, ["nodes", "status", "--json", ...openclawArgs], true);
   return [
     ...parseNodePendingList(pendingResult.stdout),
     ...parseNodeStatusPending(statusResult.stdout),
   ];
 }
 
-function approveRequest(request: PendingRequest, openclawArgs: string[]): "approved" | "stale" {
+function approveRequest(request: PendingRequest, openclawGlobalArgs: string[], openclawArgs: string[]): "approved" | "stale" {
   const command = request.kind === "device" ? "devices" : "nodes";
-  const args = [command, "approve", request.requestId, "--json", ...openclawArgs];
+  const args = [...openclawGlobalArgs, command, "approve", request.requestId, "--json", ...openclawArgs];
   try {
-    execFileSync("openclaw", args, { stdio: "inherit" });
+    const stdout = execFileSync("openclaw", args, {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    if (stdout.trim()) process.stdout.write(redactText(stdout));
     return "approved";
   } catch (error) {
     const cause = error as { stdout?: Buffer | string; stderr?: Buffer | string; message?: string };
     const output = `${cause.stdout || ""}\n${cause.stderr || ""}\n${cause.message || ""}`;
     if (/unknown requestId|unknown .*id|not found|expired/i.test(output)) return "stale";
-    throw error;
+    throw new Error(redactText(output.trim()) || "openclaw approval command failed");
   }
 }
 
 function actionLine(request: PendingRequest, dryRun: boolean): string {
   const command = `openclaw ${request.kind === "device" ? "devices" : "nodes"} approve ${request.requestId}`;
   return `${dryRun ? "[dry-run]" : "[approve]"} ${formatRequest(request)}\n  ${command}`;
+}
+
+export function shouldStopAfterSettle(input: {
+  lastActivityAt: number | null;
+  now: number;
+  settleMs: number;
+  sawNewEvenG2Request: boolean;
+}) {
+  return !input.sawNewEvenG2Request
+    && input.lastActivityAt !== null
+    && input.now - input.lastActivityAt >= input.settleMs;
 }
 
 export function approveEvenG2Pairing(argv = process.argv.slice(2)): void {
@@ -387,24 +432,28 @@ export function approveEvenG2Pairing(argv = process.argv.slice(2)): void {
   let staleCount = 0;
   let printedCount = 0;
   let blockedByOtherDevice = false;
+  let lastActivityAt: number | null = null;
 
   console.log(args.dryRun ? "Previewing Even G2 pairing approvals." : "Approving Even G2 pairing approvals.");
   if (!args.dryRun && watchMs > 0) console.log(`Watching for ${watchMs}ms.`);
 
   do {
-    for (const device of listPendingDevices(args.openclawArgs)) {
+    let sawNewEvenG2Request = false;
+    for (const device of listPendingDevices(args.openclawGlobalArgs, args.openclawArgs)) {
       if (seen.has(`${device.kind}:${device.requestId}`)) continue;
       seen.add(`${device.kind}:${device.requestId}`);
       if (isEvenG2Request(device) || args.allowNonEvenG2) {
+        sawNewEvenG2Request = true;
         console.log(actionLine(device, args.dryRun));
         printedCount += 1;
         if (!args.dryRun) {
-          const result = approveRequest(device, args.openclawArgs);
+          const result = approveRequest(device, args.openclawGlobalArgs, args.openclawArgs);
           if (result === "approved") approvedCount += 1;
           else {
             staleCount += 1;
             console.log(`[skip] ${device.kind}:${device.requestId} disappeared before approval.`);
           }
+          lastActivityAt = Date.now();
         }
       } else {
         blockedByOtherDevice = true;
@@ -412,26 +461,37 @@ export function approveEvenG2Pairing(argv = process.argv.slice(2)): void {
       }
     }
 
-    for (const node of listPendingNodes(args.openclawArgs)) {
+    for (const node of listPendingNodes(args.openclawGlobalArgs, args.openclawArgs)) {
       if (seen.has(`${node.kind}:${node.requestId}`)) continue;
       seen.add(`${node.kind}:${node.requestId}`);
       if (!isEvenG2Request(node) && !args.allowNonEvenG2) {
         console.log(`[skip] pending node is not Even G2: ${formatRequest(node)}`);
         continue;
       }
+      sawNewEvenG2Request = true;
       console.log(actionLine(node, args.dryRun));
       printedCount += 1;
       if (!args.dryRun) {
-        const result = approveRequest(node, args.openclawArgs);
+        const result = approveRequest(node, args.openclawGlobalArgs, args.openclawArgs);
         if (result === "approved") approvedCount += 1;
         else {
           staleCount += 1;
           console.log(`[skip] ${node.kind}:${node.requestId} disappeared before approval.`);
         }
+        lastActivityAt = Date.now();
       }
     }
 
     if (args.dryRun || Date.now() >= deadline) break;
+    if (shouldStopAfterSettle({
+      lastActivityAt,
+      now: Date.now(),
+      settleMs: args.settleMs,
+      sawNewEvenG2Request,
+    })) {
+      console.log(`No new Even G2 approvals for ${args.settleMs}ms; finishing early.`);
+      break;
+    }
     sleep(args.pollMs);
   } while (Date.now() <= deadline);
 

@@ -14,7 +14,8 @@ export type SimulatorFixtureMode =
   | "approval"
   | "recovery"
   | "storeChat"
-  | "storeVoice";
+  | "storeVoice"
+  | "sendNow";
 
 export const SIMULATOR_FIXTURE_SESSIONS: OpenClawSession[] = [
   {
@@ -57,6 +58,26 @@ export const SIMULATOR_FIXTURE_TRANSCRIPT: SessionTranscriptMessage[] = [
     timestamp: "2026-06-25T12:04:51.000Z",
   },
 ];
+
+export function simulatorFixtureTranscriptForSession(sessionKey: string): SessionTranscriptMessage[] {
+  if (sessionKey === SIMULATOR_FIXTURE_SESSION_KEY) return SIMULATOR_FIXTURE_TRANSCRIPT;
+  const session = SIMULATOR_FIXTURE_SESSIONS.find((entry) => entry.key === sessionKey);
+  const preview = session?.preview || session?.lastUserMessage || session?.lastAgentMessage || `Selected ${sessionKey}`;
+  return [
+    {
+      id: `fixture-${sessionKey}-user`,
+      role: "user",
+      text: preview,
+      timestamp: "2026-06-25T12:05:00.000Z",
+    },
+    {
+      id: `fixture-${sessionKey}-assistant`,
+      role: "assistant",
+      text: `Fixture transcript loaded for ${sessionKey}.`,
+      timestamp: "2026-06-25T12:05:08.000Z",
+    },
+  ];
+}
 
 export const STORE_CHAT_FIXTURE_TRANSCRIPT: SessionTranscriptMessage[] = [
   {
@@ -117,6 +138,14 @@ export function simulatorStoreVoicePendingSessionVoice(): PendingSessionVoice {
   };
 }
 
+export function simulatorSendNowPendingSessionVoice(): PendingSessionVoice {
+  return {
+    mode: "direct",
+    targetSessionKey: SIMULATOR_FIXTURE_SESSION_KEY,
+    idempotencyKey: "send-now",
+  };
+}
+
 export const STORE_VOICE_LISTENING_TEXT = "Summarize this thread, then draft the next reply.";
 
 export const VOICE_REVIEW_FIXTURE_DRAFT: VoiceDraft = {
@@ -166,6 +195,13 @@ export function simulatorFixtureViewPlan(mode: SimulatorFixtureMode, search = ""
       voiceText: STORE_VOICE_LISTENING_TEXT,
     };
   }
+  if (mode === "sendNow") {
+    return {
+      action: "store-voice",
+      pendingSessionVoice: simulatorSendNowPendingSessionVoice(),
+      voiceText: "",
+    };
+  }
   if (mode === "voiceReview") {
     return {
       action: "voice-review",
@@ -190,11 +226,17 @@ export function isSimulatorFixtureMode(value: string): value is SimulatorFixture
     || value === "approval"
     || value === "recovery"
     || value === "storeChat"
-    || value === "storeVoice";
+    || value === "storeVoice"
+    || value === "sendNow";
 }
 
 export function simulatorFixtureModeFromSearch(search: string, isDev: boolean) {
   if (!isDev) return "";
   const value = new URLSearchParams(search).get("simFixture") || "";
   return isSimulatorFixtureMode(value) ? value : "";
+}
+
+export function simulatorSessionSelectorFlowFromSearch(search: string, isDev: boolean) {
+  if (!isDev) return false;
+  return new URLSearchParams(search).get("simSessionSelectorFlow") === "1";
 }
