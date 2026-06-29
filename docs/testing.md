@@ -13,7 +13,7 @@ local package inspection, or static artifact audits:
 - CI uses Node.js 22.19.0 or newer, matching `package.json` `engines.node`.
 - `pnpm check`: source hygiene, script TypeScript, CSS module declarations,
   app typecheck, and app Vitest.
-- `pnpm ci`: default PR/CI gate.
+- `pnpm run ci`: default PR/CI gate.
 - `pnpm release:check`: the implementation behind `ci`; it runs `check`
   plus dependency audit, Even Hub packaging,
   artifact hygiene, visual asset hygiene, manifest consistency, and submission
@@ -345,7 +345,7 @@ looks correct.
 
 ## Release Gate
 
-`pnpm ci` is the default GitHub Actions gate and normal PR gate. It delegates
+`pnpm run ci` is the default GitHub Actions gate and normal PR gate. It delegates
 to `pnpm release:check`, which runs checks, audits, package inspection,
 Even Hub manifest consistency, and submission asset consistency. It must pass
 without private developer origins in `app.json` and without portal login.
@@ -364,7 +364,7 @@ failure.
 | Script | Classification | Notes |
 | --- | --- | --- |
 | `pnpm check` | CI / PR default | Required inner-loop gate. |
-| `pnpm ci` | CI / PR default | Default GitHub Actions gate; currently delegates to `release:check`. |
+| `pnpm run ci` | CI / PR default | Default GitHub Actions gate; delegates to `release:check`. |
 | `pnpm css:types` | Development helper | Regenerates CSS Module declarations after CSS class changes. |
 | `pnpm build` | Simulator / packaging | Produces `dist`. |
 | `pnpm serve:sim` | Simulator support | Serves built client under `/openclaw-even-g2-node/`. |

@@ -124,6 +124,7 @@ type ReleasePleaseConfig = {
     }>;
     "package-name"?: string;
     "release-type"?: string;
+    "versioning"?: string;
   }>;
 };
 
@@ -423,11 +424,11 @@ function auditReleasePleaseConfig(): string[] {
     if (rootConfig["changelog-path"] !== "CHANGELOG.md") {
       blockers.push(`Release Please changelog-path "${rootConfig["changelog-path"] || "<missing>"}" must be "CHANGELOG.md".`);
     }
-    if (rootConfig["bump-minor-pre-major"] !== true) {
-      blockers.push("Release Please must set bump-minor-pre-major true while this app is pre-1.0.");
+    if (rootConfig.versioning !== "always-bump-minor") {
+      blockers.push('Release Please must set versioning "always-bump-minor" so published releases avoid local patch-version churn.');
     }
-    if (rootConfig["bump-patch-for-minor-pre-major"] !== true) {
-      blockers.push("Release Please must set bump-patch-for-minor-pre-major true while this app is pre-1.0.");
+    if (rootConfig["bump-minor-pre-major"] !== undefined || rootConfig["bump-patch-for-minor-pre-major"] !== undefined) {
+      blockers.push("Release Please must not use pre-1.0 bump overrides with the minor-only release cadence.");
     }
     const appJsonVersionFile = rootConfig["extra-files"]?.find((file) => (
       file.type === "json"

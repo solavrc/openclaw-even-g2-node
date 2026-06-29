@@ -296,7 +296,7 @@ OpenClaw Gateway.
 Run this before handing off normal code changes:
 
 ```bash
-pnpm ci
+pnpm run ci
 ```
 
 This is the GitHub Actions-equivalent gate. It intentionally avoids ADB, Pixel,
@@ -367,7 +367,7 @@ After Even Hub review confirms the acceptable network declaration, update
 `publicReleaseReady: true` before treating the package as final public-release
 ready.
 
-`pnpm ci` delegates to `pnpm release:check`, which wraps:
+`pnpm run ci` delegates to `pnpm release:check`, which wraps:
 
 - `pnpm check`
 - `pnpm audit`
@@ -390,7 +390,11 @@ internal build with local, LAN, or tailnet origins.
 
 ## Versioning
 
-Versioning is managed by Release Please on `main`.
+Versioning is managed by Release Please on `main`. Release Please uses a
+minor-version cadence so published GitHub releases represent reviewable
+integration checkpoints instead of local package iterations. Use an explicit
+Release Please `Release-As` footer when a future release needs a major version
+instead of the default minor bump.
 
 Release Please opens a release PR from Conventional Commits and keeps these
 files in sync:
@@ -399,8 +403,9 @@ files in sync:
 - `app.json`
 - `.release-please-manifest.json`
 
-For Even Hub Developer Hub cache-busting or a same-code resubmission before a
-Release Please PR exists, manually advance the patch version:
+For Even Hub Developer Hub cache-busting, hardware validation, or a same-code
+resubmission before a Release Please PR exists, manually advance the patch
+version:
 
 ```bash
 pnpm version:bump -- patch
@@ -416,8 +421,8 @@ pnpm version:bump -- 0.1.3
 ```
 
 Run `pnpm release:check` before packing. Release Please remains the normal
-release automation on `main`; the manual patch bump is only for explicit
-maintainer cache-busting or review-upload needs.
+release automation on `main`; the manual patch bump is only for explicit local
+cache-busting, hardware validation, or review-upload needs.
 
 Use Conventional Commit prefixes for user-facing changes:
 
@@ -433,12 +438,6 @@ also builds a versioned `.ehpk` from the release commit and attaches it to the
 GitHub Release. It does not upload to Even Hub. Keep portal upload and review
 submission as manual maintainer steps because they depend on portal state,
 review timing, and the current network-whitelist posture.
-
-While the app is pre-1.0, Release Please is configured so `fix:` and `feat:`
-commits produce patch releases, while breaking changes produce minor releases.
-This keeps normal release artifacts aligned with Even Hub cache-busting needs
-without using prerelease or build metadata that Even Hub packaging does not
-accept.
 
 Every `.ehpk` uploaded for real-device validation should have a new
 `app.json`/package patch version so Even Hub does not reuse a cached package.
