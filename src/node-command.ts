@@ -1,4 +1,5 @@
 import type { DeviceInfo, DeviceStatus } from "@evenrealities/even_hub_sdk";
+import { CANVAS_IMAGE_MAX_INLINE_BYTES } from "./canvas-command";
 import { serializableDeviceInfo, serializableDeviceStatus } from "./even-device-status";
 
 export const OPENCLAW_NODE_COMMANDS = [
@@ -60,6 +61,13 @@ export function canvasImageUrlUnsupportedError(): NodeCommandError {
   return {
     code: "CANVAS_IMAGE_URL_UNSUPPORTED",
     message: "Image canvas currently requires data:image/... or base64 image data. Fetch remote images in Gateway and send inline image data.",
+  };
+}
+
+export function canvasImageTooLargeError(maxBytes = CANVAS_IMAGE_MAX_INLINE_BYTES): NodeCommandError {
+  return {
+    code: "CANVAS_IMAGE_TOO_LARGE",
+    message: `Image canvas inline payload is too large. Send data:image/... or base64 image data no larger than ${maxBytes} bytes.`,
   };
 }
 
@@ -139,6 +147,7 @@ export function deviceInfoCommandResult(options: DeviceInfoResultOptions) {
       textPayloadFields: CANVAS_TEXT_PAYLOAD_FIELDS,
       imagePayloadFields: CANVAS_IMAGE_PAYLOAD_FIELDS,
       imageMimeTypes: CANVAS_IMAGE_MIME_TYPES,
+      maxInlineImageBytes: CANVAS_IMAGE_MAX_INLINE_BYTES,
       remoteImageUrls: false,
     },
   };

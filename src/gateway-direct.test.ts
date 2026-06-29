@@ -97,6 +97,16 @@ function encodeSetupCode(payload: unknown) {
   return btoa(raw).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
 }
 
+function deferred<T>() {
+  let resolve: (value: T) => void = () => undefined;
+  let reject: (error: unknown) => void = () => undefined;
+  const promise = new Promise<T>((promiseResolve, promiseReject) => {
+    resolve = promiseResolve;
+    reject = promiseReject;
+  });
+  return { promise, resolve, reject };
+}
+
 function lastConnectParams(ws: FakeGatewayWebSocket) {
   let raw: string | undefined;
   for (let index = ws.sent.length - 1; index >= 0; index -= 1) {
@@ -320,11 +330,17 @@ describe("Gateway direct setup", () => {
   it("scopes stored device tokens by Gateway URL", () => {
     const authStore = new BrowserDeviceAuthStore(new MemoryStorage());
     authStore.save("device-1", "node", "gateway-a-token", [], "wss://gateway-a.example.test/ws?setup=secret#pairing");
+    authStore.save("device-1", "node", "tenant-token", [], "wss://gateway-a.example.test/ws?tenant=alpha&setup=secret#pairing");
 
     expect(authStore.load("device-1", "node", "wss://gateway-a.example.test/ws")).toMatchObject({
       token: "gateway-a-token",
       role: "node",
     });
+    expect(authStore.load("device-1", "node", "wss://gateway-a.example.test/ws?setup=other&tenant=alpha")).toMatchObject({
+      token: "tenant-token",
+      role: "node",
+    });
+    expect(authStore.load("device-1", "node", "wss://gateway-a.example.test/ws?tenant=beta")).toBeNull();
     expect(authStore.load("device-1", "node", "wss://gateway-b.example.test/ws")).toBeNull();
   });
 
@@ -495,6 +511,85 @@ describe("Gateway session events", () => {
     await Promise.resolve();
     expect(messages).not.toContainEqual(expect.objectContaining({ type: "eveng2.runtime.status" }));
     expect(FakeGatewayWebSocket.instances).toHaveLength(1);
+  });
+
+  it("does not open a Gateway socket when closed during identity load", async () => {
+    const identityLoad = deferred<DeviceIdentity>();
+    const session = new GatewayWsSession({
+      url: "wss://gateway.example.test",
+      role: "node",
+      scopes: [],
+      caps: [],
+      commands: [],
+      client: buildEvenG2ClientInfo("node", "inst-1"),
+      userAgent: "test",
+      WebSocketCtor: FakeGatewayWebSocketCtor,
+      identityStore: {
+        loadOrCreate: async () => identityLoad.promise,
+        sign: async () => "sig",
+      },
+      authStore: new BrowserDeviceAuthStore(new MemoryStorage()),
+    });
+
+    const connectPromise = session.connect();
+    session.close();
+    identityLoad.resolve(identity);
+    await connectPromise;
+
+    expect(FakeGatewayWebSocket.instances).toHaveLength(0);
+  });
+
+  it("does not answer a stale Gateway challenge after close", async () => {
+    const signature = deferred<string>();
+    const session = new GatewayWsSession({
+      url: "wss://gateway.example.test",
+      role: "node",
+      scopes: [],
+      caps: [],
+      commands: [],
+      client: buildEvenG2ClientInfo("node", "inst-1"),
+      userAgent: "test",
+      WebSocketCtor: FakeGatewayWebSocketCtor,
+      identityStore: {
+        loadOrCreate: async () => identity,
+        sign: async () => signature.promise,
+      },
+      authStore: new BrowserDeviceAuthStore(new MemoryStorage()),
+    });
+
+    await session.connect();
+    const ws = FakeGatewayWebSocket.instances[0]!;
+    ws.receive({ type: "event", event: "connect.challenge", payload: { nonce: "nonce-1" } });
+    session.close();
+    signature.resolve("sig");
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(ws.sent.some((item) => item.includes("\"method\":\"connect\""))).toBe(false);
+  });
+
+  it("rejects pending Gateway RPCs when closed", async () => {
+    const session = new GatewayWsSession({
+      url: "wss://gateway.example.test",
+      role: "operator",
+      scopes: ["operator.read"],
+      caps: [],
+      commands: [],
+      client: buildEvenG2ClientInfo("ui", "inst-1"),
+      userAgent: "test",
+      WebSocketCtor: FakeGatewayWebSocketCtor,
+      identityStore: {
+        loadOrCreate: async () => identity,
+        sign: async () => "sig",
+      },
+      authStore: new BrowserDeviceAuthStore(new MemoryStorage()),
+    });
+
+    await session.connect();
+    const request = session.request("talk.catalog", undefined, 30_000);
+    session.close();
+
+    await expect(request).rejects.toThrow("gateway session closed");
   });
 
   it("persists bounded operator handoff tokens from setup-code hello", async () => {

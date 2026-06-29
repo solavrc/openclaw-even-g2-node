@@ -65,7 +65,11 @@ Useful fields are `clientId`, `clientMode`, `platform`, `deviceFamily`,
 `approvalState`, `pendingRequestId`, `pendingDeclaredCaps`, and
 `pendingDeclaredCommands`. The app also provides
 `pnpm device:preview:latest` and `pnpm device:approve:latest` for local
-development approval loops.
+development approval loops. Those helpers should only auto-approve requests
+with an Even G2 platform, native Even G2 client id, Even G2 display name, or a
+legacy `node-host` glasses request that also advertises Even G2 canvas/talk
+node surface. A generic `node-host` request is not enough to prove it belongs
+to this app.
 
 Onboarding is not a fixed wizard. The app can see connection failures and
 operator events, while the user or OpenClaw Agent may see the fuller Gateway
@@ -238,7 +242,8 @@ Image canvas input should be inline image data. Remote image URLs are rejected
 by this app because the Even Hub package should not fetch arbitrary remote
 media on behalf of OpenClaw. Gateway or the invoking agent should fetch or
 generate the image, convert it to an inline `data:image/...` URL or base64
-payload, and then invoke `canvas.present`.
+payload within `device.info.canvas.maxInlineImageBytes`, and then invoke
+`canvas.present`.
 
 The glasses display is 576x288. The app scales image canvas payloads to fit
 that display and sends the result to Even Hub as tiled image containers.

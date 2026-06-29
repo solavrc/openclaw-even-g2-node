@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  CANVAS_IMAGE_MAX_INLINE_BYTES,
   canvasImageDataUrlFromParams,
   canvasHideCommandResult,
   imageCanvasCommandResult,
@@ -42,6 +43,17 @@ describe("canvasImageDataUrlFromParams", () => {
     expect(canvasImageDataUrlFromParams({ base64, imageMimeType: "image/jpeg" })).toEqual({
       dataUrl: `data:image/jpeg;base64,${base64}`,
       alt: "",
+    });
+  });
+
+  it("rejects oversized inline image payloads before image decoding", () => {
+    const dataUrl = `data:image/png;base64,${"A".repeat(CANVAS_IMAGE_MAX_INLINE_BYTES)}`;
+
+    expect(canvasImageDataUrlFromParams({ dataUrl })).toBeNull();
+    expect(canvasNodeCommandPlan("canvas.present", { dataUrl })).toEqual({
+      action: "image-too-large",
+      requiresBridge: false,
+      maxBytes: CANVAS_IMAGE_MAX_INLINE_BYTES,
     });
   });
 });
