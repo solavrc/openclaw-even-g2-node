@@ -61,7 +61,7 @@ function cleanHudText(text: string) {
 }
 
 export function shortText(text: string, max = 72) {
-  const clean = text.replace(/\s+/g, " ").trim();
+  const clean = cleanGlassText(text).replace(/\s+/g, " ").trim();
   return clean.length > max ? `${clean.slice(0, Math.max(0, max - 3))}...` : clean;
 }
 

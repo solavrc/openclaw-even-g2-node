@@ -69,6 +69,7 @@ function spawnProcess(command: string, args: string[], options: SpawnOptions = {
   child.on("error", (error) => {
     process.stderr.write(`${command} ${args.join(" ")} failed to start: ${error.message}\n`);
   });
+  child.stdout?.resume();
   return child;
 }
 

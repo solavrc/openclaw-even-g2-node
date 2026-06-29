@@ -240,6 +240,18 @@ describe("glass session view", () => {
     expect(frame.body).toMatch(/\.\.\.$/);
   });
 
+  it("bounds unsupported emoji fallback after HUD text normalization", () => {
+    const frame = formatGlassVoiceDraftViewFrame({
+      activeSessionLabel: "main",
+      text: "🔌".repeat(80),
+    });
+
+    expect(frame.body).toHaveLength(220);
+    expect(frame.body).toMatch(/\.\.\.$/);
+    expect(frame.body).toContain("[emoji]");
+    expect(frame.body).not.toContain("🔌");
+  });
+
   it("renders the latest turn with a speaker header and no footer", () => {
     const text = formatGlassSessionView({
       activeSessionLabel: "main",

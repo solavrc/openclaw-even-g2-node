@@ -46,6 +46,10 @@ export function documentedEvenG2GlyphsText() {
   for (let value = 0x250C; value <= 0x254B; value += 1) codePoints.add(value);
   for (let value = 0x256D; value <= 0x2573; value += 1) codePoints.add(value);
   for (let value = 0x2581; value <= 0x258F; value += 1) codePoints.add(value);
+  codePoints.add(0x3000);
+  for (let value = 0xFF10; value <= 0xFF19; value += 1) codePoints.add(value);
+  for (let value = 0xFF21; value <= 0xFF3A; value += 1) codePoints.add(value);
+  for (let value = 0xFF41; value <= 0xFF5A; value += 1) codePoints.add(value);
   for (const codePoint of DOCUMENTED_EVEN_G2_SYMBOL_GLYPHS) codePoints.add(codePoint);
   return [...codePoints].sort((a, b) => a - b).map((codePoint) => String.fromCodePoint(codePoint)).join("");
 }

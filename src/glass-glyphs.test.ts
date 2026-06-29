@@ -24,6 +24,10 @@ describe("Even G2 documented glyph coverage", () => {
   it("exports a stable probe string of documented glyphs", () => {
     const text = documentedEvenG2GlyphsText();
     expect(text).toContain("ABC");
+    expect(text).toContain("　");
+    expect(text).toContain("１２３");
+    expect(text).toContain("ＡＢＣ");
+    expect(text).toContain("ａｂｃ");
     expect(text).toContain("♡");
     expect(text).toContain("▶");
     expect(text).not.toContain("🔌");
