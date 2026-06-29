@@ -287,104 +287,24 @@ This also invokes `canvas.present` on the configured Even G2 node before reading
 pnpm e2e:agent:live -- --node "Even G2" --canvas-text "E2E canvas check"
 ```
 
-For live runs that should not touch the maintainer's everyday Gateway context,
-prefer the isolated wrapper:
+For live runs against an already-running local Gateway, start the app and
+simulator, pair and approve the Even G2 node, resolve the connected `nodeId`,
+then pass that exact node to the evidence command:
 
 ```bash
-pnpm e2e:agent:isolated
-```
-
-The wrapper creates a fresh timestamped OpenClaw profile by default, chooses
-free local ports, starts the test Gateway, starts Vite, starts the Even Hub
-simulator with an injected setup code, approves Even G2 device/operator/node
-requests inside the test profile, resolves the currently connected Even G2
-`nodeId`, and finally runs `pnpm e2e:agent:live` against that exact node. This
-avoids stale same-name node ambiguity from previous runs.
-The approval watch window is an upper bound; after the first approval activity,
-`pnpm device:approve:latest` exits early once no new Even G2 request appears for
-its settle window.
-
-Use explicit names or ports only when coordinating multiple local runs:
-
-```bash
-pnpm e2e:agent:isolated -- \
-  --profile eveng2-e2e-manual \
-  --gateway-port 19001 \
-  --app-port 5174 \
-  --simulator-port 9898 \
-  --out-dir /tmp/openclaw-even-g2-e2e-live
-```
-
-Add `--voice-review-smoke` to run the microphone/Talk Review smoke inside the
-isolated profile after pairing. Add `--send-now-smoke` to run the direct WAV
-attachment smoke instead; the wrapper starts the app with `e2eVoiceMode=direct`
-for that mode. These smokes remain local on-demand checks because they depend on
-microphone input, Gateway voice/provider setup, and the GUI simulator.
-
-The setup code and OpenClaw tokens are not written to the evidence bundle or
-the wrapper's final summary. Command output is redacted before printing. When a
-brand-new profile needs a CLI operator scope upgrade before it can approve the
-Even G2 pairing requests, the wrapper approves that bootstrap request directly
-inside the throwaway profile and then retries the normal Gateway approval flow.
-
-For manual debugging, start a dedicated test Gateway profile and pass that
-context explicitly. This keeps Gateway config, sessions, pairing approvals, and
-node state out of the default OpenClaw profile. The Even G2 platform is not one
-of OpenClaw's built-in mobile platform IDs, so the throwaway Gateway also needs
-an explicit node command allowlist for the canvas commands used by this E2E:
-
-```bash
-openclaw --profile eveng2-e2e config set gateway.nodes.allowCommands \
-  '["canvas.present","canvas.hide","canvas.snapshot","talk.ptt.once"]' \
-  --strict-json
-openclaw --profile eveng2-e2e gateway --dev --force --port 19001 --auth none
-```
-
-In another terminal, generate the setup QR from the same profile, pair the
-simulator or G2 app with that QR, then run the E2E evidence command against the
-test Gateway. The current OpenClaw CLI still requires an explicit credential
-when `--url` is passed, even for an `--auth none` local Gateway; use a throwaway
-dummy token for this isolated profile:
-
-```bash
-export EVENG2_E2E_OPENCLAW_TOKEN="dummy-e2e-token"
-openclaw --profile eveng2-e2e qr \
-  --url ws://127.0.0.1:19001 \
-  --token "$EVENG2_E2E_OPENCLAW_TOKEN"
-pnpm device:approve:latest -- \
-  --openclaw-profile eveng2-e2e \
-  --url ws://127.0.0.1:19001 \
-  --token "$EVENG2_E2E_OPENCLAW_TOKEN"
+pnpm dev
+pnpm simulator 'http://127.0.0.1:5174/?resetPairing=1&e2eLog=1&setupCode=<setup-code>' \
+  --automation-port 9898
+pnpm device:approve:latest -- --watch-ms 45000
+openclaw nodes status --json
 pnpm e2e:agent:live -- \
-  --openclaw-profile eveng2-e2e \
-  --openclaw-url ws://127.0.0.1:19001 \
-  --openclaw-token "$EVENG2_E2E_OPENCLAW_TOKEN" \
-  --node "Even G2" \
+  --simulator-url http://127.0.0.1:9898 \
+  --node "<connected Even G2 nodeId>" \
   --canvas-text "E2E canvas check"
 ```
 
-If a manual fresh profile's CLI identity asks for additional operator scopes
-before `pnpm device:approve:latest` can call `devices` or `nodes`, approve that
-bootstrap request only inside the throwaway profile. Do not switch the repo
-branch or reuse the maintainer's default Gateway state for this step.
-
 The E2E bundle records the OpenClaw profile, URL, and whether a token was
-provided. Token values are redacted from command evidence and manifests. If the
-test Gateway is containerized, pass `--openclaw-container <name>` to
-`pnpm device:approve:latest` and `pnpm e2e:agent:live` so every OpenClaw CLI
-call crosses the same isolation boundary.
-
-OpenClaw command isolation for this flow:
-
-| Step | Command family | Isolation requirement |
-| --- | --- | --- |
-| Test Gateway | `openclaw --profile eveng2-e2e gateway ...` | Gateway runs under the dedicated profile/state. |
-| Setup QR | `openclaw --profile eveng2-e2e qr --url ... --token ...` | QR points at the test Gateway URL/token. |
-| Device/operator approval | `pnpm device:approve:latest -- --openclaw-profile eveng2-e2e --url ... --token ...` | Wrapper places profile/container before `devices ...` subcommands and URL/token on Gateway calls. |
-| Node approval | same `pnpm device:approve:latest` run | Wrapper uses the same profile/container and URL/token for `nodes pending/status/approve`. |
-| Node evidence | `pnpm e2e:agent:live -- --openclaw-profile eveng2-e2e --openclaw-url ... --openclaw-token ...` | Harness uses the same profile/container and URL/token for every `nodes invoke`. |
-| Isolated wrapper | `pnpm e2e:agent:isolated` | Runs the full test Gateway, simulator, approval, connected-node resolution, and live evidence flow under a fresh profile by default. |
-| Optional container boundary | add `--openclaw-container <name>` | Container global arg is applied before all OpenClaw subcommands. |
+provided. Token values are redacted from command evidence and manifests.
 
 The intended reviewer is the Coding Agent itself, a separate Codex session, or
 an OpenClaw-routed agent. The reviewer should return `pass`, `warn`, `fail`, or
@@ -605,7 +525,6 @@ failure.
 | `pnpm sim:fixtures` | Simulator / local visual smoke | Starts setup plus fixture simulator runs and checks HUD/WebView screenshots. |
 | `pnpm e2e:agent` | Agentic local review | Collects simulator/OpenClaw evidence and writes a prompt for Coding Agent fuzzy review. |
 | `pnpm e2e:agent:live` | Agentic local review | Same as `e2e:agent`, but also invokes `canvas.present` on the active OpenClaw node. |
-| `pnpm e2e:agent:isolated` | Agentic local review | Starts a fresh test Gateway profile, pairs the simulator, resolves connected nodeId, and runs live evidence collection. |
 | `pnpm e2e:agent:review:validate` | Agentic local review | Validates `llm-review.json` against the required fuzzy-review schema. |
 | `pnpm run pack` | Packaging | Builds and writes `openclaw-even-g2-node.ehpk`. |
 | `pnpm release:check` | CI / release gate | Runs broad release checks; release status separately reports the runtime Gateway whitelist review risk. |
