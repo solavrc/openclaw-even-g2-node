@@ -6,6 +6,7 @@ import {
   parseE2eGlassMarkers,
   parseE2eSessionMarkers,
   parseE2eVoiceMarkers,
+  nodeStatusHasConnectedNode,
   redactCommandArgs,
   redactText,
 } from "./e2e-agent-review.ts";
@@ -50,13 +51,43 @@ describe("e2e agent review helpers", () => {
   });
 
   it("redacts tokens and setup codes before writing evidence", () => {
-    const redacted = redactText("Bearer abc.def setupCode=wss%3A%2F%2Fgateway.example%2Fws%3Ftoken%3Dsecret token=plain");
+    const redacted = redactText("Bearer abc.def setupCode=wss%3A%2F%2Fgateway.example%2Fws%3Ftoken%3Dsecret token=plain url=ws://gateway.example/ws?bootstrap=one&setup_token=two");
 
     expect(redacted).toContain("Bearer <redacted>");
     expect(redacted).toContain("setupCode=<redacted>");
     expect(redacted).toContain("token=<redacted>");
+    expect(redacted).toContain("bootstrap=<redacted>");
+    expect(redacted).toContain("setup_token=<redacted>");
     expect(redacted).not.toContain("abc.def");
     expect(redacted).not.toContain("secret");
+    expect(redacted).not.toContain("one");
+    expect(redacted).not.toContain("two");
+  });
+
+  it("accepts array-shaped OpenClaw node status output", () => {
+    expect(nodeStatusHasConnectedNode({
+      context: {
+        authProvided: false,
+        container: "",
+        profile: "",
+        url: "",
+      },
+      enabled: true,
+      liveCanvas: false,
+      nodeName: "Even G2 Local",
+      nodeStatus: {
+        ok: true,
+        args: ["openclaw", "nodes", "status"],
+        exitCode: 0,
+        stdout: "[]",
+        stderr: "",
+        timedOut: false,
+        json: [
+          { nodeId: "other", displayName: "Other", connected: false },
+          { nodeId: "node-even-g2", displayName: "Even G2 Local", connected: true },
+        ],
+      },
+    })).toBe(true);
   });
 
   it("redacts separated OpenClaw CLI token arguments", () => {

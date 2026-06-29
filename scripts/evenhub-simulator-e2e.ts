@@ -107,16 +107,14 @@ async function runSessionFlow(initial: SimulatorCapture) {
 }
 
 async function runSessionSelectorFlow(initial: SimulatorCapture) {
-  const consoleText = await waitForConsoleText("selector-flow-change-dispatched", 8_000);
   for (const expected of [
+    "selector-flow-change-dispatched",
     "refresh-sessions",
     "switch-session",
     "eveng2.session.switch.applied",
     "transcript-snapshot",
   ]) {
-    if (!consoleText.includes(expected)) {
-      throw new Error(`Expected session selector console marker ${expected}`);
-    }
+    await waitForConsoleText(expected, 8_000);
   }
   await sleep(500);
   const switched = await captureStep("session-selector-switch");

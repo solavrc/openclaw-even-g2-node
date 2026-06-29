@@ -1363,11 +1363,13 @@ export class GatewayDirectTransport extends EventTarget {
     if (this.operatorSession !== session) return;
     if (this.nodeSessionOpen) {
       this.operatorSession = null;
+      const pauseReconnect = shouldPauseOperatorReconnect(error.message);
       this.emit({
         type: "error",
         error: error.message,
-        ...(shouldPauseOperatorReconnect(error.message) ? { pauseReconnect: true } : {}),
+        ...(pauseReconnect ? { pauseReconnect: true } : {}),
       });
+      if (!pauseReconnect) this.close(undefined, error.message || "operator session failed");
       return;
     }
     this.fail(error);
@@ -1378,13 +1380,15 @@ export class GatewayDirectTransport extends EventTarget {
     const reason = closeReasonFromEvent(event);
     if (this.nodeSessionOpen) {
       this.operatorSession = null;
+      const pauseReconnect = shouldPauseOperatorReconnect(reason);
       if (reason) {
         this.emit({
           type: "error",
           error: reason,
-          ...(shouldPauseOperatorReconnect(reason) ? { pauseReconnect: true } : {}),
+          ...(pauseReconnect ? { pauseReconnect: true } : {}),
         });
       }
+      if (!pauseReconnect) this.close(undefined, reason || "operator session closed");
       return;
     }
     if (reason) this.fail(new Error(reason));

@@ -182,10 +182,10 @@ export function parseArgs(argv: string[], now = new Date()): ParsedArgs {
 
 export function redactText(value: string) {
   return value
-    .replace(/("(?:token|secret|authorization|apiKey|api_key|auth|bootstrapToken)"\s*:\s*")[^"]*(")/gi, "$1<redacted>$2")
+    .replace(/("(?:token|secret|authorization|apiKey|api_key|auth|bootstrap|bootstrapToken|bootstrap_token|setup|setupCode|setup_code|setupToken|setup_token)"\s*:\s*")[^"]*(")/gi, "$1<redacted>$2")
     .replace(/(Bearer\s+)[A-Za-z0-9._~+/=-]+/gi, "$1<redacted>")
     .replace(/(--(?:token|openclaw-token|password|api-key|apiKey)\s+)[^\s"']+/gi, "$1<redacted>")
-    .replace(/((?:setupCode|token|apiKey|api_key|authorization|auth)=)[^&\s"']+/gi, "$1<redacted>")
+    .replace(/((?:bootstrap|bootstrapToken|bootstrap_token|bootstraptoken|setup|setupCode|setup_code|setupToken|setup_token|setuptoken|token|apiKey|api_key|authorization|auth)=)[^&\s"']+/gi, "$1<redacted>")
     .replace(/(wss?:\/\/[^/\s"'@]+:)[^@\s"']+@/gi, "$1<redacted>@");
 }
 
@@ -195,7 +195,7 @@ function redactValue(value: unknown): unknown {
   if (!value || typeof value !== "object") return value;
   return Object.fromEntries(
     Object.entries(value as Record<string, unknown>).map(([key, item]) => {
-      if (/token|secret|authorization|apiKey|api_key/i.test(key)) return [key, "<redacted>"];
+      if (/token|secret|authorization|apiKey|api_key|bootstrap|setup/i.test(key)) return [key, "<redacted>"];
       return [key, redactValue(item)];
     }),
   );
@@ -378,15 +378,16 @@ function collectOpenClawEvidence(args: ParsedArgs): OpenClawEvidence {
   return evidence;
 }
 
-function commandJsonRecord(command: CommandEvidence | undefined) {
-  if (!command?.json || typeof command.json !== "object" || Array.isArray(command.json)) return null;
-  return command.json as Record<string, unknown>;
+function commandJsonNodes(command: CommandEvidence | undefined) {
+  const json = command?.json;
+  if (Array.isArray(json)) return json;
+  if (!json || typeof json !== "object") return [];
+  const nodes = (json as Record<string, unknown>).nodes;
+  return Array.isArray(nodes) ? nodes : [];
 }
 
-function nodeStatusHasConnectedNode(openclaw: OpenClawEvidence) {
-  const record = commandJsonRecord(openclaw.nodeStatus);
-  const nodes = record?.nodes;
-  if (!Array.isArray(nodes)) return false;
+export function nodeStatusHasConnectedNode(openclaw: OpenClawEvidence) {
+  const nodes = commandJsonNodes(openclaw.nodeStatus);
   return nodes.some((node) => {
     if (!node || typeof node !== "object" || Array.isArray(node)) return false;
     const entry = node as Record<string, unknown>;

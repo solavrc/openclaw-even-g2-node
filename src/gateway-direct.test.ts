@@ -1179,28 +1179,32 @@ describe("Gateway direct voice", () => {
     });
   });
 
-  it("allows reconnect after transient operator session errors while the node session stays open", () => {
+  it("closes the transport after transient operator session errors so the app can reconnect", () => {
     const gateway = new GatewayDirectTransport({
       setupCodeOrUrl: "ws://127.0.0.1:18789",
       token: "",
     });
     const session = {};
+    const closeListener = vi.fn();
     const messages: Array<Record<string, unknown>> = [];
+    gateway.addEventListener("close", closeListener);
     gateway.addEventListener("message", (event) => {
       messages.push(JSON.parse((event as MessageEvent).data as string) as Record<string, unknown>);
     });
     Reflect.set(gateway, "nodeSessionOpen", true);
+    Reflect.set(gateway, "nodeSession", { close: vi.fn() });
     Reflect.set(gateway, "operatorSession", session);
 
     const handleOperatorSessionError = Reflect.get(gateway, "handleOperatorSessionError");
     if (typeof handleOperatorSessionError !== "function") throw new Error("GatewayDirectTransport.handleOperatorSessionError is unavailable");
     handleOperatorSessionError.call(gateway, new Error("network blip"), session);
 
-    expect(gateway.readyState).toBe(gateway.CONNECTING);
-    expect(gateway.canSendNodeCommandResult()).toBe(true);
-    expect(Reflect.get(gateway, "operatorSession")).toBeNull();
+    expect(gateway.readyState).toBe(gateway.CLOSED);
+    expect(gateway.canSendNodeCommandResult()).toBe(false);
     expect(messages).toContainEqual({ type: "error", error: "network blip" });
     expect(messages).not.toContainEqual(expect.objectContaining({ pauseReconnect: true }));
+    expect(closeListener).toHaveBeenCalledTimes(1);
+    expect((closeListener.mock.calls[0]?.[0] as CloseEvent | undefined)?.reason).toBe("network blip");
   });
 
   it("sends node command results while only the node session is open", async () => {
