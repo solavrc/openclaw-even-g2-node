@@ -131,6 +131,42 @@ EVENG2_SIM_FLOW=recovery pnpm sim:e2e
 transcription works because fixture flows can inject transcript events without
 using a live provider.
 
+### Emoji And Symbol Glyph Audit
+
+The Even G2 text renderer can display a limited symbol font. Some characters
+that desktop/mobile input methods classify as emoji, such as `♡`, `▶`, `□`, and
+`★`, are regular supported text glyphs on the glasses. Other emoji code points
+emit LVGL `glyph dsc. not found` warnings and render as missing glyphs.
+
+Run the glyph audit when changing text normalization or deciding which
+characters should pass through unchanged:
+
+```bash
+pnpm sim:emoji-glyphs
+```
+
+To test a specific user/session sample, pass it as grapheme clusters:
+
+```bash
+pnpm sim:emoji-glyphs -- --text '⚙️ 🔌 🔊 🪢 ♡ ▶ □ ★ 👍'
+```
+
+The script starts a local Vite server and the official simulator, renders each
+candidate with the dev-only `simFixture=emojiProbe` view, captures the glasses
+HUD, and writes:
+
+```text
+.openclaw-even-g2-node/emoji-glyph-report.json
+```
+
+Candidates with no matching LVGL missing-glyph warnings are probably
+displayable. If the report marks `needsVisualReview: true`, inspect the
+`reviewPath` image before adding the character to a pass-through allowlist,
+because some simulator glyphs can be legible but still differ from the expected
+desktop emoji shape. Unsupported candidates should be replaced with a compact
+fallback before sending text to the glasses so a single missing glyph does not
+expand into a long label on the HUD.
+
 To test the real Review voice path against a running simulator, paired Even G2
 node, OpenClaw Gateway, microphone, and configured Talk provider:
 

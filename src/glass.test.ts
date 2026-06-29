@@ -18,6 +18,8 @@ import {
 } from "./glass";
 import { glassInputActionFromEvent } from "./glass-events";
 
+const UTF8_ENCODER = new TextEncoder();
+
 describe("glass input events", () => {
   it("normalizes numeric and string event types", () => {
     expect(glassInputActionFromEvent({ textEvent: { eventType: 0 } })).toBe("click");
@@ -332,6 +334,25 @@ describe("glass session view", () => {
     expect(text).toContain("word");
     expect(text).not.toContain("/ Waiting input");
     expect(text).not.toContain("...");
+  });
+
+  it("splits transcript pages after unsupported glyph replacement", () => {
+    const frames = Array.from({ length: 20 }, (_, logCursor) => formatGlassSessionViewFrame({
+      activeSessionLabel: "main",
+      statusText: "ready",
+      logCursor,
+      messages: [
+        { role: "assistant", text: "🔌".repeat(120) },
+      ],
+    }));
+
+    const uniqueFrames = [...new Map(frames.map((frame) => [frame.header, frame])).values()];
+    expect(uniqueFrames.length).toBeGreaterThan(1);
+    expect(uniqueFrames[0]?.body).toContain("[emoji]");
+    expect(uniqueFrames.some((frame) => frame.body.includes("🔌"))).toBe(false);
+    for (const frame of uniqueFrames) {
+      expect(UTF8_ENCODER.encode(glassHudFrameToText(frame)).length).toBeLessThanOrEqual(420);
+    }
   });
 
   it("hides internal or unknown-role transcript entries", () => {

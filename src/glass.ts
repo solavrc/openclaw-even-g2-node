@@ -1,3 +1,5 @@
+import { cleanGlassText } from "./glass-text";
+
 export type OpenClawSession = {
   key: string;
   preview?: string;
@@ -55,14 +57,7 @@ export function glassStatusFrame(header: string, body = "", hint = ""): GlassHud
 }
 
 function cleanHudText(text: string) {
-  return text
-    .replace(/`/g, "'")
-    .replace(/\r\n?/g, "\n")
-    .split("\n")
-    .map((line) => line.replace(/\t/g, " ").replace(/[ ]+$/g, ""))
-    .join("\n")
-    .replace(/\n{3,}/g, "\n\n")
-    .trim();
+  return cleanGlassText(text);
 }
 
 export function shortText(text: string, max = 72) {
@@ -176,11 +171,11 @@ export function wrapGlassSessionText(text: string) {
 }
 
 function normalizedTranscriptText(text: string) {
-  return text
+  return cleanGlassText(text
     .replace(/\r\n?/g, "\n")
     .replace(/[ \t]+/g, " ")
     .replace(/\n{3,}/g, "\n\n")
-    .trim();
+    .trim());
 }
 
 function utf8ByteLength(text: string) {
