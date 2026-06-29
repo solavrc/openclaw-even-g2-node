@@ -1157,7 +1157,7 @@ describe("Gateway direct voice", () => {
       setupCodeOrUrl: "ws://127.0.0.1:18789",
       token: "",
     });
-    const session = {};
+    const session = { close: vi.fn() };
     const messages: Array<Record<string, unknown>> = [];
     gateway.addEventListener("message", (event) => {
       messages.push(JSON.parse((event as MessageEvent).data as string) as Record<string, unknown>);
@@ -1172,6 +1172,7 @@ describe("Gateway direct voice", () => {
     expect(gateway.readyState).toBe(gateway.CONNECTING);
     expect(gateway.canSendNodeCommandResult()).toBe(true);
     expect(Reflect.get(gateway, "operatorSession")).toBeNull();
+    expect(session.close).toHaveBeenCalledTimes(1);
     expect(messages).toContainEqual({
       type: "error",
       error: "unauthorized: gateway token missing",
@@ -1184,7 +1185,7 @@ describe("Gateway direct voice", () => {
       setupCodeOrUrl: "ws://127.0.0.1:18789",
       token: "",
     });
-    const session = {};
+    const session = { close: vi.fn() };
     const closeListener = vi.fn();
     const messages: Array<Record<string, unknown>> = [];
     gateway.addEventListener("close", closeListener);
@@ -1201,6 +1202,7 @@ describe("Gateway direct voice", () => {
 
     expect(gateway.readyState).toBe(gateway.CLOSED);
     expect(gateway.canSendNodeCommandResult()).toBe(false);
+    expect(session.close).toHaveBeenCalledTimes(1);
     expect(messages).toContainEqual({ type: "error", error: "network blip" });
     expect(messages).not.toContainEqual(expect.objectContaining({ pauseReconnect: true }));
     expect(closeListener).toHaveBeenCalledTimes(1);

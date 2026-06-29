@@ -1362,8 +1362,9 @@ export class GatewayDirectTransport extends EventTarget {
   private handleOperatorSessionError(error: Error, session: GatewayWsSession) {
     if (this.operatorSession !== session) return;
     if (this.nodeSessionOpen) {
-      this.operatorSession = null;
       const pauseReconnect = shouldPauseOperatorReconnect(error.message);
+      this.operatorSession = null;
+      session.close();
       this.emit({
         type: "error",
         error: error.message,
