@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { activateKeepAlive, keepAliveState, resetKeepAliveForTests } from "./keep-alive";
+import { activateKeepAlive, deactivateKeepAlive, keepAliveState, resetKeepAliveForTests } from "./keep-alive";
 
 class FakeAudioContext extends EventTarget {
   readonly destination = {};
@@ -31,8 +31,7 @@ describe("keep-alive", () => {
 
   it("activates quiet audio and requests a Web Lock when supported", async () => {
     const lockRequest = vi.fn((_name: string, _options: unknown, callback: () => Promise<void>) => {
-      void callback();
-      return Promise.resolve();
+      return callback();
     });
     vi.stubGlobal("AudioContext", FakeAudioContext);
     vi.stubGlobal("navigator", { locks: { request: lockRequest } });
@@ -46,6 +45,24 @@ describe("keep-alive", () => {
     expect(options).toEqual({ mode: "exclusive" });
     expect(typeof callback).toBe("function");
     expect(keepAliveState().lock).toBe("active");
+  });
+
+  it("releases the Web Lock during teardown", async () => {
+    let lockPromise: Promise<void> | undefined;
+    const lockRequest = vi.fn((_name: string, _options: unknown, callback: () => Promise<void>) => {
+      lockPromise = callback();
+      return lockPromise;
+    });
+    vi.stubGlobal("navigator", { locks: { request: lockRequest } });
+
+    activateKeepAlive("test-lock");
+    await Promise.resolve();
+    expect(keepAliveState().lock).toBe("active");
+
+    deactivateKeepAlive();
+    await lockPromise;
+
+    expect(keepAliveState().lock).toBe("inactive");
   });
 
   it("reports unsupported capabilities without throwing", () => {

@@ -27,6 +27,8 @@ let oscillator: OscillatorNode | null = null;
 let gainNode: GainNode | null = null;
 let lockActive = false;
 let lockRequestStarted = false;
+let lockRelease: (() => void) | null = null;
+let lockRequestGeneration = 0;
 let audioFailed = false;
 let lockFailed = false;
 
@@ -65,13 +67,27 @@ export function activateKeepAlive(lockName = DEFAULT_LOCK_NAME): KeepAliveState 
   if (!lockRequestStarted && locks) {
     lockRequestStarted = true;
     lockFailed = false;
+    const generation = ++lockRequestGeneration;
     void locks.request(lockName, { mode: "exclusive" }, () => {
+      if (generation !== lockRequestGeneration) return Promise.resolve();
       lockActive = true;
-      return new Promise<void>(() => undefined);
+      return new Promise<void>((resolve) => {
+        lockRelease = () => {
+          lockRelease = null;
+          resolve();
+        };
+      });
+    }).then(() => {
+      if (generation !== lockRequestGeneration) return;
+      lockActive = false;
+      lockRequestStarted = false;
+      lockRelease = null;
     }).catch(() => {
+      if (generation !== lockRequestGeneration) return;
       lockFailed = true;
       lockActive = false;
       lockRequestStarted = false;
+      lockRelease = null;
     });
   }
 
@@ -99,8 +115,12 @@ export function deactivateKeepAlive() {
     void audioContext.close().catch(() => undefined);
   }
   audioContext = null;
+  const releaseLock = lockRelease;
+  lockRequestGeneration += 1;
+  lockRelease = null;
   lockActive = false;
   lockRequestStarted = false;
+  releaseLock?.();
 }
 
 export function keepAliveState(): KeepAliveState {
@@ -116,8 +136,12 @@ export function resetKeepAliveForTests() {
   oscillator = null;
   gainNode = null;
   audioContext = null;
+  const releaseLock = lockRelease;
+  lockRequestGeneration += 1;
+  lockRelease = null;
   lockActive = false;
   lockRequestStarted = false;
+  releaseLock?.();
   audioFailed = false;
   lockFailed = false;
 }

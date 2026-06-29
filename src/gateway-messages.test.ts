@@ -134,6 +134,7 @@ describe("gateway message parsing", () => {
       nextSessionKey: "agent:main:next",
       changed: true,
       shouldRequestTranscript: true,
+      hasNodeSnapshot: true,
       nodeSnapshot: { nodeConnected: true },
     });
     expect(runtimeStatusSessionUpdate({
@@ -143,6 +144,17 @@ describe("gateway message parsing", () => {
       nextSessionKey: "agent:main:main",
       changed: false,
       shouldRequestTranscript: false,
+      hasNodeSnapshot: false,
+      nodeSnapshot: null,
+    });
+    expect(runtimeStatusSessionUpdate({
+      type: "eveng2.runtime.status",
+      node: null,
+    }, "agent:main:main")).toEqual({
+      nextSessionKey: "",
+      changed: false,
+      shouldRequestTranscript: false,
+      hasNodeSnapshot: true,
       nodeSnapshot: null,
     });
   });

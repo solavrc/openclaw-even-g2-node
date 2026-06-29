@@ -449,6 +449,7 @@ export function App() {
   const userEditedSettingsRef = useRef(false);
   const reconnectTimerRef = useRef<number | null>(null);
   const reconnectAttemptRef = useRef(0);
+  const reconnectPausedRef = useRef(false);
   const connectedRef = useRef(false);
   const listeningRef = useRef(false);
   const gatewayUrlRef = useRef(initial.gatewayUrl);
@@ -811,7 +812,10 @@ export function App() {
         dataUrl,
         alt: `OpenClaw prompt: ${options.ask}`,
       });
-      return renderGlassImageCanvas(bridge, tiles);
+      const rendered = await renderGlassImageCanvas(bridge, tiles);
+      if (rendered) return true;
+      devLog("[Even G2] OpenClaw ask canvas image refused; rendering text fallback");
+      return renderGlass(openClawAskFallbackFrame(options), bridge);
     } catch (error) {
       devLog("[Even G2] OpenClaw ask canvas failed", error);
       return renderGlass(openClawAskFallbackFrame(options), bridge);
@@ -1637,6 +1641,7 @@ export function App() {
 
   function retryNow() {
     if (!gatewayUrlRef.current.trim() || connectedRef.current) return;
+    reconnectPausedRef.current = false;
     clearReconnectTimer();
     setStatus("retrying now");
     connect();
@@ -1677,6 +1682,7 @@ export function App() {
 
   function handleGatewayTransportOpened(ws: GatewayTransport) {
     reconnectAttemptRef.current = 0;
+    reconnectPausedRef.current = false;
     setActiveConnected(true);
     setStatus("connected");
     stripBootstrapSetupTokenFromState();
@@ -1694,7 +1700,7 @@ export function App() {
     const nextStatus = gatewayCloseStatus(reason, statusRef.current);
     setStatus(nextStatus);
     if (reason) void renderConnectionGuidance(nextStatus);
-    scheduleReconnect(reason ? "needs attention" : nextStatus);
+    if (!reconnectPausedRef.current) scheduleReconnect(reason ? "needs attention" : nextStatus);
   }
 
   function handleGatewayTransportError() {
@@ -1702,7 +1708,7 @@ export function App() {
     clearSessionTranscriptLoadingState();
     const nextStatus = gatewayErrorStatus(statusRef.current);
     setStatus(nextStatus);
-    scheduleReconnect(nextStatus);
+    if (!reconnectPausedRef.current) scheduleReconnect(nextStatus);
   }
 
   function handleGatewayTransportMessage(ws: GatewayTransport, event: MessageEvent) {
@@ -1712,6 +1718,7 @@ export function App() {
   }
 
   function connect() {
+    reconnectPausedRef.current = false;
     clearReconnectTimer();
     stopVoice();
     clearSessionTranscriptLoadingState();
@@ -1837,7 +1844,7 @@ export function App() {
         setActiveSessionKey(update.nextSessionKey);
         if (update.shouldRequestTranscript) requestSessionTranscript(update.nextSessionKey);
       }
-      if (update.nodeSnapshot) setActiveNodeSnapshot(update.nodeSnapshot);
+      if (update.hasNodeSnapshot) setActiveNodeSnapshot(update.nodeSnapshot);
     }
     if (!pendingSessionVoiceRef.current) setStatus("ready");
     if (glassViewRef.current === "sessionHome") renderGlassSessionHome("ready");
@@ -1995,10 +2002,11 @@ export function App() {
   function handleGatewayErrorMessage(msg: GatewayErrorMessage) {
     const nextStatus = gatewayErrorStatusFromMessage(msg);
     const plan = connectionErrorPresentationPlan(nextStatus, msg.error, Boolean(gatewayUrlRef.current.trim()));
+    reconnectPausedRef.current = msg.pauseReconnect === true || plan.reconnectReason === "";
     setStatus(nextStatus);
     if (plan.target === "guidance") void renderConnectionGuidance(plan.statusText);
     else void renderGlass(plan.frame);
-    scheduleReconnect(plan.reconnectReason);
+    if (!msg.pauseReconnect && plan.reconnectReason) scheduleReconnect(plan.reconnectReason);
   }
 
   function handleGatewayMessage(ws: GatewayTransport, msg: GatewayMessage) {
