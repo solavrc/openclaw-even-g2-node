@@ -429,9 +429,16 @@ chore: refresh simulator fixtures
 ```
 
 The Release Please PR creates the Git tag and GitHub Release after merge. It
-does not upload to Even Hub. Keep Even Hub packaging, portal upload, and review
+also builds a versioned `.ehpk` from the release commit and attaches it to the
+GitHub Release. It does not upload to Even Hub. Keep portal upload and review
 submission as manual maintainer steps because they depend on portal state,
 review timing, and the current network-whitelist posture.
+
+While the app is pre-1.0, Release Please is configured so `fix:` and `feat:`
+commits produce patch releases, while breaking changes produce minor releases.
+This keeps normal release artifacts aligned with Even Hub cache-busting needs
+without using prerelease or build metadata that Even Hub packaging does not
+accept.
 
 Every `.ehpk` uploaded for real-device validation should have a new
 `app.json`/package patch version so Even Hub does not reuse a cached package.

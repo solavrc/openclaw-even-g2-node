@@ -114,6 +114,8 @@ type EvenHubAppManifest = {
 
 type ReleasePleaseConfig = {
   packages?: Record<string, {
+    "bump-minor-pre-major"?: boolean;
+    "bump-patch-for-minor-pre-major"?: boolean;
     "changelog-path"?: string;
     "extra-files"?: Array<{
       jsonpath?: string;
@@ -399,6 +401,9 @@ function auditReleasePleaseConfig(): string[] {
   if (!fs.existsSync(".release-please-manifest.json")) {
     blockers.push(".release-please-manifest.json is missing.");
   }
+  if (!fs.existsSync(".github/workflows/release-please.yml")) {
+    blockers.push(".github/workflows/release-please.yml is missing.");
+  }
   if (blockers.length) return ["Release Please configuration is incomplete:", ...blockers.map((item) => `- ${item}`)];
 
   const config = JSON.parse(fs.readFileSync("release-please-config.json", "utf8")) as ReleasePleaseConfig;
@@ -417,6 +422,12 @@ function auditReleasePleaseConfig(): string[] {
     }
     if (rootConfig["changelog-path"] !== "CHANGELOG.md") {
       blockers.push(`Release Please changelog-path "${rootConfig["changelog-path"] || "<missing>"}" must be "CHANGELOG.md".`);
+    }
+    if (rootConfig["bump-minor-pre-major"] !== true) {
+      blockers.push("Release Please must set bump-minor-pre-major true while this app is pre-1.0.");
+    }
+    if (rootConfig["bump-patch-for-minor-pre-major"] !== true) {
+      blockers.push("Release Please must set bump-patch-for-minor-pre-major true while this app is pre-1.0.");
     }
     const appJsonVersionFile = rootConfig["extra-files"]?.find((file) => (
       file.type === "json"
@@ -445,6 +456,20 @@ function auditReleasePleaseConfig(): string[] {
     : "";
   if (!/Version `\d+\.\d+\.\d+`:.*x-release-please-version/.test(maintainerRelease)) {
     blockers.push("docs/maintainers/release.md release-notes version line must include x-release-please-version for Release Please.");
+  }
+  const releasePleaseWorkflow = fs.readFileSync(".github/workflows/release-please.yml", "utf8");
+  const workflowRequirements = [
+    ["release-created gate", "steps.release.outputs.release_created == 'true'"],
+    ["release commit checkout", "ref: ${{ steps.release.outputs.sha }}"],
+    ["Even Hub package build", "corepack pnpm run pack"],
+    ["versioned .ehpk asset", "openclaw-even-g2-node-${{ steps.release.outputs.version }}.ehpk"],
+    ["GitHub Release upload", "gh release upload"],
+    ["Release Please tag upload target", "steps.release.outputs.tag_name"],
+  ] as const;
+  for (const [label, requiredText] of workflowRequirements) {
+    if (!releasePleaseWorkflow.includes(requiredText)) {
+      blockers.push(`Release Please workflow must include ${label}.`);
+    }
   }
   return blockers.length ? ["Release Please configuration is not ready:", ...blockers.map((item) => `- ${item}`)] : [];
 }
