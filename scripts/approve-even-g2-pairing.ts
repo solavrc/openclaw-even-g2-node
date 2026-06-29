@@ -11,6 +11,7 @@ type ParsedArgs = {
   openclawArgs: string[];
   openclawGlobalArgs: string[];
   pollMs: number;
+  settleMs: number;
   watchMs: number | null;
 };
 
@@ -39,6 +40,7 @@ type PendingRequest = {
 
 const DEFAULT_WATCH_MS = 30_000;
 const DEFAULT_POLL_MS = 750;
+const DEFAULT_SETTLE_MS = 8_000;
 const EVEN_G2_NODE_CAPS = new Set(["canvas", "talk"]);
 const EVEN_G2_NODE_COMMANDS = new Set([
   "canvas.hide",
@@ -66,6 +68,7 @@ Options handled by this wrapper:
   --dry-run             Print the actions without approving.
   --watch-ms <ms>       Watch duration. Default: ${DEFAULT_WATCH_MS}ms for approve, one pass for dry-run.
   --poll-ms <ms>        Poll interval while watching. Default: ${DEFAULT_POLL_MS}ms.
+  --settle-ms <ms>      After approving at least one request, stop once no new Even G2 request appears for this long. Default: ${DEFAULT_SETTLE_MS}ms.
   --openclaw-container <name>
                         Run OpenClaw CLI calls through this container.
   --openclaw-profile <name>
@@ -105,6 +108,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
   let dryRun = false;
   let watchMs: number | null = null;
   let pollMs = DEFAULT_POLL_MS;
+  let settleMs = DEFAULT_SETTLE_MS;
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
     if (arg === "--") {
@@ -122,6 +126,11 @@ export function parseArgs(argv: string[]): ParsedArgs {
       const value = argv[index + 1];
       if (!value) throw new Error("--poll-ms requires a value.");
       pollMs = Math.max(100, readNumber(value, "--poll-ms"));
+      index += 1;
+    } else if (arg === "--settle-ms") {
+      const value = argv[index + 1];
+      if (!value) throw new Error("--settle-ms requires a value.");
+      settleMs = readNumber(value, "--settle-ms");
       index += 1;
     } else if (arg === "--openclaw-container") {
       const value = argv[index + 1];
@@ -144,7 +153,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
       openclawArgs.push(arg);
     }
   }
-  return { allowNonEvenG2, dryRun, openclawArgs, openclawGlobalArgs, pollMs, watchMs };
+  return { allowNonEvenG2, dryRun, openclawArgs, openclawGlobalArgs, pollMs, settleMs, watchMs };
 }
 
 function runOpenClaw(openclawGlobalArgs: string[], commandArgs: string[], allowExitOne = false): CommandResult {
@@ -403,6 +412,17 @@ function actionLine(request: PendingRequest, dryRun: boolean): string {
   return `${dryRun ? "[dry-run]" : "[approve]"} ${formatRequest(request)}\n  ${command}`;
 }
 
+export function shouldStopAfterSettle(input: {
+  lastActivityAt: number | null;
+  now: number;
+  settleMs: number;
+  sawNewEvenG2Request: boolean;
+}) {
+  return !input.sawNewEvenG2Request
+    && input.lastActivityAt !== null
+    && input.now - input.lastActivityAt >= input.settleMs;
+}
+
 export function approveEvenG2Pairing(argv = process.argv.slice(2)): void {
   const args = parseArgs(argv);
   const watchMs = args.watchMs ?? (args.dryRun ? 0 : DEFAULT_WATCH_MS);
@@ -412,15 +432,18 @@ export function approveEvenG2Pairing(argv = process.argv.slice(2)): void {
   let staleCount = 0;
   let printedCount = 0;
   let blockedByOtherDevice = false;
+  let lastActivityAt: number | null = null;
 
   console.log(args.dryRun ? "Previewing Even G2 pairing approvals." : "Approving Even G2 pairing approvals.");
   if (!args.dryRun && watchMs > 0) console.log(`Watching for ${watchMs}ms.`);
 
   do {
+    let sawNewEvenG2Request = false;
     for (const device of listPendingDevices(args.openclawGlobalArgs, args.openclawArgs)) {
       if (seen.has(`${device.kind}:${device.requestId}`)) continue;
       seen.add(`${device.kind}:${device.requestId}`);
       if (isEvenG2Request(device) || args.allowNonEvenG2) {
+        sawNewEvenG2Request = true;
         console.log(actionLine(device, args.dryRun));
         printedCount += 1;
         if (!args.dryRun) {
@@ -430,6 +453,7 @@ export function approveEvenG2Pairing(argv = process.argv.slice(2)): void {
             staleCount += 1;
             console.log(`[skip] ${device.kind}:${device.requestId} disappeared before approval.`);
           }
+          lastActivityAt = Date.now();
         }
       } else {
         blockedByOtherDevice = true;
@@ -444,6 +468,7 @@ export function approveEvenG2Pairing(argv = process.argv.slice(2)): void {
         console.log(`[skip] pending node is not Even G2: ${formatRequest(node)}`);
         continue;
       }
+      sawNewEvenG2Request = true;
       console.log(actionLine(node, args.dryRun));
       printedCount += 1;
       if (!args.dryRun) {
@@ -453,10 +478,20 @@ export function approveEvenG2Pairing(argv = process.argv.slice(2)): void {
           staleCount += 1;
           console.log(`[skip] ${node.kind}:${node.requestId} disappeared before approval.`);
         }
+        lastActivityAt = Date.now();
       }
     }
 
     if (args.dryRun || Date.now() >= deadline) break;
+    if (shouldStopAfterSettle({
+      lastActivityAt,
+      now: Date.now(),
+      settleMs: args.settleMs,
+      sawNewEvenG2Request,
+    })) {
+      console.log(`No new Even G2 approvals for ${args.settleMs}ms; finishing early.`);
+      break;
+    }
     sleep(args.pollMs);
   } while (Date.now() <= deadline);
 

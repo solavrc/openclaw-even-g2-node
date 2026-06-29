@@ -6,6 +6,7 @@ import {
   parseNodePendingList,
   parseNodeStatusPending,
   isEvenG2Request,
+  shouldStopAfterSettle,
 } from "./approve-even-g2-pairing.ts";
 
 describe("approve Even G2 pairing helpers", () => {
@@ -15,6 +16,7 @@ describe("approve Even G2 pairing helpers", () => {
       watchMs: null,
       openclawArgs: [],
       openclawGlobalArgs: [],
+      settleMs: 8000,
     });
     expect(parseArgs(["--dry-run"])).toMatchObject({
       dryRun: true,
@@ -25,7 +27,17 @@ describe("approve Even G2 pairing helpers", () => {
   });
 
   it("keeps Gateway CLI options for OpenClaw calls", () => {
-    expect(parseArgs(["--url", "wss://gateway.example/ws", "--token", "token", "--watch-ms", "45000"])).toMatchObject({
+    expect(parseArgs([
+      "--url",
+      "wss://gateway.example/ws",
+      "--token",
+      "token",
+      "--watch-ms",
+      "45000",
+      "--settle-ms",
+      "2500",
+    ])).toMatchObject({
+      settleMs: 2500,
       watchMs: 45000,
       openclawArgs: ["--url", "wss://gateway.example/ws", "--token", "token"],
       openclawGlobalArgs: [],
@@ -220,5 +232,32 @@ describe("approve Even G2 pairing helpers", () => {
         commands: ["canvas.snapshot"],
       }),
     ]);
+  });
+
+  it("stops watching only after post-activity idle settle time", () => {
+    expect(shouldStopAfterSettle({
+      lastActivityAt: null,
+      now: 10_000,
+      settleMs: 8_000,
+      sawNewEvenG2Request: false,
+    })).toBe(false);
+    expect(shouldStopAfterSettle({
+      lastActivityAt: 1_000,
+      now: 12_000,
+      settleMs: 8_000,
+      sawNewEvenG2Request: true,
+    })).toBe(false);
+    expect(shouldStopAfterSettle({
+      lastActivityAt: 5_000,
+      now: 10_000,
+      settleMs: 8_000,
+      sawNewEvenG2Request: false,
+    })).toBe(false);
+    expect(shouldStopAfterSettle({
+      lastActivityAt: 1_000,
+      now: 10_000,
+      settleMs: 8_000,
+      sawNewEvenG2Request: false,
+    })).toBe(true);
   });
 });

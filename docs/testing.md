@@ -277,6 +277,9 @@ simulator with an injected setup code, approves Even G2 device/operator/node
 requests inside the test profile, resolves the currently connected Even G2
 `nodeId`, and finally runs `pnpm e2e:agent:live` against that exact node. This
 avoids stale same-name node ambiguity from previous runs.
+The approval watch window is an upper bound; after the first approval activity,
+`pnpm device:approve:latest` exits early once no new Even G2 request appears for
+its settle window.
 
 Use explicit names or ports only when coordinating multiple local runs:
 
