@@ -1,6 +1,6 @@
 # Testing
 
-Last reviewed: 2026-06-27.
+Last reviewed: 2026-06-29.
 
 Use the cheapest layer that covers the change. The simulator is useful for HUD
 layout and event logic, but it is not hardware emulation.
@@ -212,12 +212,15 @@ pnpm sim:fixtures
 
 `sim:fixtures` starts and stops the required local app servers and Even Hub
 simulator processes. It builds the app first, then covers setup, session
-navigation, review-before-send, canvas, approval, and recovery fixture HUDs.
-It also writes `.openclaw-even-g2-node/simulator-fixtures-report.json` for local
-debugging. The report is written on both pass and failure and is Git-ignored.
-Treat it as optional visual-smoke context, not release evidence: app permissions,
-packaged runtime behavior, OpenClaw state, and real glasses behavior still need
-the appropriate private/beta build checks.
+navigation, review-before-send, canvas, approval, and recovery fixture HUDs. For
+interactive fixture states it also drives representative glasses input events:
+session `up`/`down`, Review `tap send`, canvas `tap hide`, approval rerender and
+`tap allow`, tutorial skip, and Send now cancellation. It writes
+`.openclaw-even-g2-node/simulator-fixtures-report.json` for local debugging. The
+report is written on both pass and failure and is Git-ignored. Treat it as
+optional visual-smoke context, not release evidence: app permissions, packaged
+runtime behavior, OpenClaw state, and real glasses behavior still need the
+appropriate private/beta build checks.
 
 ## Agentic E2E Review
 
@@ -242,7 +245,7 @@ pnpm e2e:agent
 - a snapshot of `docs/user-stories.md`;
 - simulator glasses and phone WebView screenshots;
 - simulator console logs and structured glass state markers when available;
-- OpenClaw `device.status` and `canvas.snapshot` command evidence when the
+- OpenClaw `nodes status` and `canvas.snapshot` command evidence when the
   local `openclaw` CLI can reach the active Gateway;
 - `review-prompt.md`, which tells the Coding Agent how to judge the run;
 - `llm-review.template.json`, which the Coding Agent can replace with its
@@ -260,6 +263,65 @@ This also invokes `canvas.present` on the configured Even G2 node before reading
 ```bash
 pnpm e2e:agent:live -- --node "Even G2" --canvas-text "E2E canvas check"
 ```
+
+For live runs that should not touch the maintainer's everyday Gateway context,
+start a dedicated test Gateway profile and pass that context explicitly. This
+keeps Gateway config, sessions, pairing approvals, and node state out of the
+default OpenClaw profile. The Even G2 platform is not one of OpenClaw's built-in
+mobile platform IDs, so the throwaway Gateway also needs an explicit node
+command allowlist for the canvas commands used by this E2E:
+
+```bash
+openclaw --profile eveng2-e2e config set gateway.nodes.allowCommands \
+  '["canvas.present","canvas.hide","canvas.snapshot","talk.ptt.once"]' \
+  --strict-json
+openclaw --profile eveng2-e2e gateway --dev --force --port 19001 --auth none
+```
+
+In another terminal, generate the setup QR from the same profile, pair the
+simulator or G2 app with that QR, then run the E2E evidence command against the
+test Gateway. The current OpenClaw CLI still requires an explicit credential
+when `--url` is passed, even for an `--auth none` local Gateway; use a throwaway
+dummy token for this isolated profile:
+
+```bash
+export EVENG2_E2E_OPENCLAW_TOKEN="dummy-e2e-token"
+openclaw --profile eveng2-e2e qr \
+  --url ws://127.0.0.1:19001 \
+  --token "$EVENG2_E2E_OPENCLAW_TOKEN"
+pnpm device:approve:latest -- \
+  --openclaw-profile eveng2-e2e \
+  --url ws://127.0.0.1:19001 \
+  --token "$EVENG2_E2E_OPENCLAW_TOKEN"
+pnpm e2e:agent:live -- \
+  --openclaw-profile eveng2-e2e \
+  --openclaw-url ws://127.0.0.1:19001 \
+  --openclaw-token "$EVENG2_E2E_OPENCLAW_TOKEN" \
+  --node "Even G2" \
+  --canvas-text "E2E canvas check"
+```
+
+If a fresh profile's CLI identity asks for additional operator scopes before
+`pnpm device:approve:latest` can call `devices` or `nodes`, approve that
+bootstrap request only inside the throwaway profile. Do not switch the repo
+branch or reuse the maintainer's default Gateway state for this step.
+
+The E2E bundle records the OpenClaw profile, URL, and whether a token was
+provided. Token values are redacted from command evidence and manifests. If the
+test Gateway is containerized, pass `--openclaw-container <name>` to
+`pnpm device:approve:latest` and `pnpm e2e:agent:live` so every OpenClaw CLI
+call crosses the same isolation boundary.
+
+OpenClaw command isolation for this flow:
+
+| Step | Command family | Isolation requirement |
+| --- | --- | --- |
+| Test Gateway | `openclaw --profile eveng2-e2e gateway ...` | Gateway runs under the dedicated profile/state. |
+| Setup QR | `openclaw --profile eveng2-e2e qr --url ... --token ...` | QR points at the test Gateway URL/token. |
+| Device/operator approval | `pnpm device:approve:latest -- --openclaw-profile eveng2-e2e --url ... --token ...` | Wrapper places profile/container before `devices ...` subcommands and URL/token on Gateway calls. |
+| Node approval | same `pnpm device:approve:latest` run | Wrapper uses the same profile/container and URL/token for `nodes pending/status/approve`. |
+| Node evidence | `pnpm e2e:agent:live -- --openclaw-profile eveng2-e2e --openclaw-url ... --openclaw-token ...` | Harness uses the same profile/container and URL/token for every `nodes invoke`. |
+| Optional container boundary | add `--openclaw-container <name>` | Container global arg is applied before all OpenClaw subcommands. |
 
 The intended reviewer is the Coding Agent itself, a separate Codex session, or
 an OpenClaw-routed agent. The reviewer should return `pass`, `warn`, `fail`, or

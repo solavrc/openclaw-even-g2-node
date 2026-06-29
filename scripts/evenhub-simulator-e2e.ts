@@ -1,6 +1,7 @@
 import {
   assertCaptureLooksVisible,
   captureSimulator,
+  sendSimulatorInput,
   simulatorConsoleText,
   type SimulatorCapture,
 } from "./simulator-utils.js";
@@ -50,16 +51,27 @@ async function captureStep(label: string) {
   throw new Error(`${label} did not become visible after retries: ${detail}${lastCapture ? ` reviewPath=${lastCapture.reviewPath}` : ""}`);
 }
 
+function stepEvidence(name: string, capture: SimulatorCapture, action?: string) {
+  return {
+    name,
+    ...(action ? { action } : {}),
+    litPixels: capture.litPixels,
+    reviewPath: capture.reviewPath,
+    webviewPath: capture.webviewPath,
+  };
+}
+
+async function inputAndCapture(action: Parameters<typeof sendSimulatorInput>[1], label: string) {
+  await sendSimulatorInput(BASE_URL, action);
+  await sleep(500);
+  return captureStep(label);
+}
+
 async function runSetupSmoke(initial: SimulatorCapture) {
   return {
     flow: "setup",
     steps: [
-      {
-        name: "setup",
-        litPixels: initial.litPixels,
-        reviewPath: initial.reviewPath,
-        webviewPath: initial.webviewPath,
-      },
+      stepEvidence("setup", initial),
     ],
   };
 }
@@ -68,16 +80,15 @@ async function runSessionFlow(initial: SimulatorCapture) {
   if (initial.litPixels < SESSION_LIT_THRESHOLD) {
     throw new Error(`Expected session-like HUD with enough text, got litPixels=${initial.litPixels}`);
   }
+  const previous = await inputAndCapture("up", "session-up");
+  const latest = await inputAndCapture("down", "session-down");
 
   return {
     flow: "session",
     steps: [
-      {
-        name: "initial-session",
-        litPixels: initial.litPixels,
-        reviewPath: initial.reviewPath,
-        webviewPath: initial.webviewPath,
-      },
+      stepEvidence("initial-session", initial),
+      stepEvidence("previous-turn", previous, "up"),
+      stepEvidence("latest-turn", latest, "down"),
     ],
   };
 }
@@ -95,16 +106,25 @@ async function runVisualFixtureFlow(initial: SimulatorCapture, flow: Exclude<Sim
   if (initial.litPixels < 1_200) {
     throw new Error(`Expected visible ${flow} fixture HUD, got litPixels=${initial.litPixels}`);
   }
+  const steps = [stepEvidence(flow, initial)];
+  if (flow === "voiceReview") {
+    steps.push(stepEvidence("voice-review-send", await inputAndCapture("click", "voice-review-send"), "click"));
+  } else if (flow === "canvas") {
+    steps.push(stepEvidence("canvas-hide", await inputAndCapture("click", "canvas-hide"), "click"));
+  } else if (flow === "canvasTutorial") {
+    steps.push(stepEvidence("canvas-tutorial-skip", await inputAndCapture("click", "canvas-tutorial-skip"), "click"));
+  } else if (flow === "approval") {
+    steps.push(stepEvidence("approval-rerender", await inputAndCapture("up", "approval-rerender"), "up"));
+    steps.push(stepEvidence("approval-allow", await inputAndCapture("click", "approval-allow"), "click"));
+  } else if (flow === "storeChat") {
+    steps.push(stepEvidence("store-chat-previous", await inputAndCapture("up", "store-chat-up"), "up"));
+    steps.push(stepEvidence("store-chat-latest", await inputAndCapture("down", "store-chat-down"), "down"));
+  } else if (flow === "storeVoice") {
+    steps.push(stepEvidence("store-voice-cancel", await inputAndCapture("double_click", "store-voice-cancel"), "double_click"));
+  }
   return {
     flow,
-    steps: [
-      {
-        name: flow,
-        litPixels: initial.litPixels,
-        reviewPath: initial.reviewPath,
-        webviewPath: initial.webviewPath,
-      },
-    ],
+    steps,
   };
 }
 

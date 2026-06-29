@@ -3,6 +3,7 @@ import {
   buildReviewPrompt,
   parseArgs,
   parseE2eGlassMarkers,
+  redactCommandArgs,
   redactText,
 } from "./e2e-agent-review.ts";
 
@@ -16,6 +17,14 @@ describe("e2e agent review helpers", () => {
       "http://127.0.0.1:9999",
       "--node",
       "Even G2 Local",
+      "--openclaw-container",
+      "openclaw-eveng2-e2e",
+      "--openclaw-profile",
+      "eveng2-e2e",
+      "--openclaw-url",
+      "ws://127.0.0.1:19001",
+      "--openclaw-token",
+      "test-token",
       "--openclaw-live-canvas",
       "--canvas-text",
       "hello",
@@ -27,7 +36,11 @@ describe("e2e agent review helpers", () => {
       canvasText: "hello",
       liveCanvas: true,
       nodeName: "Even G2 Local",
+      openclawContainer: "openclaw-eveng2-e2e",
+      openclawProfile: "eveng2-e2e",
       openclawTimeoutMs: 7000,
+      openclawToken: "test-token",
+      openclawUrl: "ws://127.0.0.1:19001",
       outDir: "/tmp/e2e-review",
       simulatorUrl: "http://127.0.0.1:9999",
     });
@@ -41,6 +54,34 @@ describe("e2e agent review helpers", () => {
     expect(redacted).toContain("token=<redacted>");
     expect(redacted).not.toContain("abc.def");
     expect(redacted).not.toContain("secret");
+  });
+
+  it("redacts separated OpenClaw CLI token arguments", () => {
+    expect(redactCommandArgs([
+      "openclaw",
+      "--container",
+      "openclaw-eveng2-e2e",
+      "--profile",
+      "eveng2-e2e",
+      "nodes",
+      "invoke",
+      "--url",
+      "ws://127.0.0.1:19001/ws?token=secret",
+      "--token",
+      "plain-token",
+    ])).toEqual([
+      "openclaw",
+      "--container",
+      "openclaw-eveng2-e2e",
+      "--profile",
+      "eveng2-e2e",
+      "nodes",
+      "invoke",
+      "--url",
+      "ws://127.0.0.1:19001/ws?token=<redacted>",
+      "--token",
+      "<redacted>",
+    ]);
   });
 
   it("extracts structured glass state markers from simulator console text", () => {

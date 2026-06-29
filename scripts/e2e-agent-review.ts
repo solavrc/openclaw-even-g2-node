@@ -14,8 +14,12 @@ import { errorStack } from "./strict-helpers.ts";
 type ParsedArgs = {
   canvasText: string;
   liveCanvas: boolean;
+  openclawContainer: string;
+  openclawProfile: string;
   nodeName: string;
   openclawTimeoutMs: number;
+  openclawToken: string;
+  openclawUrl: string;
   outDir: string;
   simulatorUrl: string;
   skipOpenClaw: boolean;
@@ -35,10 +39,16 @@ type CommandEvidence = {
 type OpenClawEvidence = {
   canvasPresent?: CommandEvidence;
   canvasSnapshot?: CommandEvidence;
-  deviceStatus?: CommandEvidence;
+  context: {
+    authProvided: boolean;
+    container: string;
+    profile: string;
+    url: string;
+  };
   enabled: boolean;
   liveCanvas: boolean;
   nodeName: string;
+  nodeStatus?: CommandEvidence;
 };
 
 type SimulatorEvidence = {
@@ -54,6 +64,10 @@ const DEFAULT_OUT_ROOT = path.join(process.cwd(), ".openclaw-even-g2-node", "e2e
 const DEFAULT_SIMULATOR_URL = process.env.EVENG2_SIMULATOR_URL || "http://127.0.0.1:9898";
 const DEFAULT_NODE_NAME = process.env.EVENG2_E2E_NODE || "Even G2";
 const DEFAULT_OPENCLAW_TIMEOUT_MS = 5_000;
+const DEFAULT_OPENCLAW_CONTAINER = process.env.EVENG2_E2E_OPENCLAW_CONTAINER || "";
+const DEFAULT_OPENCLAW_PROFILE = process.env.EVENG2_E2E_OPENCLAW_PROFILE || "";
+const DEFAULT_OPENCLAW_URL = process.env.EVENG2_E2E_OPENCLAW_URL || "";
+const DEFAULT_OPENCLAW_TOKEN = process.env.EVENG2_E2E_OPENCLAW_TOKEN || "";
 const E2E_GLASS_MARKER = "[openclaw-even-g2-node:e2e:glass]";
 
 const HELP = `Collect an agent-review evidence bundle for Even G2 user-story E2E review.
@@ -67,6 +81,10 @@ Options:
   --out-dir <path>          Output directory. Default: .openclaw-even-g2-node/e2e-agent-runs/<timestamp>
   --simulator-url <url>     Even Hub simulator automation URL. Default: ${DEFAULT_SIMULATOR_URL}
   --node <name>             OpenClaw node name/id. Default: ${DEFAULT_NODE_NAME}
+  --openclaw-container <n>  OpenClaw container name for all CLI node evidence. Default: EVENG2_E2E_OPENCLAW_CONTAINER
+  --openclaw-profile <name> OpenClaw CLI profile for node evidence. Default: EVENG2_E2E_OPENCLAW_PROFILE or current CLI profile
+  --openclaw-url <url>      Gateway WebSocket URL for node evidence. Default: EVENG2_E2E_OPENCLAW_URL or OpenClaw CLI config
+  --openclaw-token <token>  Gateway token for node evidence. Default: EVENG2_E2E_OPENCLAW_TOKEN
   --openclaw-live-canvas    Invoke canvas.present before canvas.snapshot.
   --canvas-text <text>      Text for --openclaw-live-canvas.
   --openclaw-timeout-ms <n> Timeout for each OpenClaw CLI call. Default: ${DEFAULT_OPENCLAW_TIMEOUT_MS}
@@ -95,8 +113,12 @@ export function parseArgs(argv: string[], now = new Date()): ParsedArgs {
   const args: ParsedArgs = {
     canvasText: `OpenClaw Even G2 E2E canvas check ${now.toISOString()}`,
     liveCanvas: false,
+    openclawContainer: DEFAULT_OPENCLAW_CONTAINER,
+    openclawProfile: DEFAULT_OPENCLAW_PROFILE,
     nodeName: DEFAULT_NODE_NAME,
     openclawTimeoutMs: DEFAULT_OPENCLAW_TIMEOUT_MS,
+    openclawToken: DEFAULT_OPENCLAW_TOKEN,
+    openclawUrl: DEFAULT_OPENCLAW_URL,
     outDir: path.join(DEFAULT_OUT_ROOT, timestampSlug(now)),
     simulatorUrl: DEFAULT_SIMULATOR_URL,
     skipOpenClaw: false,
@@ -115,6 +137,18 @@ export function parseArgs(argv: string[], now = new Date()): ParsedArgs {
       index += 1;
     } else if (arg === "--node") {
       args.nodeName = readFlagValue(argv, index, arg);
+      index += 1;
+    } else if (arg === "--openclaw-container") {
+      args.openclawContainer = readFlagValue(argv, index, arg);
+      index += 1;
+    } else if (arg === "--openclaw-profile") {
+      args.openclawProfile = readFlagValue(argv, index, arg);
+      index += 1;
+    } else if (arg === "--openclaw-url") {
+      args.openclawUrl = readFlagValue(argv, index, arg);
+      index += 1;
+    } else if (arg === "--openclaw-token") {
+      args.openclawToken = readFlagValue(argv, index, arg);
       index += 1;
     } else if (arg === "--openclaw-live-canvas") {
       args.liveCanvas = true;
@@ -182,12 +216,24 @@ function writeJson(filePath: string, value: unknown) {
   fs.writeFileSync(filePath, `${JSON.stringify(redactValue(value), null, 2)}\n`);
 }
 
+async function sleep(ms: number) {
+  await new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 function sha256File(filePath: string) {
   return crypto.createHash("sha256").update(fs.readFileSync(filePath)).digest("hex");
 }
 
-function runOpenClaw(args: string[], timeoutMs: number): CommandEvidence {
-  const result = spawnSync("openclaw", args, {
+function openClawGlobalArgs(args: ParsedArgs) {
+  return [
+    ...(args.openclawContainer ? ["--container", args.openclawContainer] : []),
+    ...(args.openclawProfile ? ["--profile", args.openclawProfile] : []),
+  ];
+}
+
+function runOpenClaw(args: ParsedArgs, commandArgs: string[], timeoutMs: number): CommandEvidence {
+  const fullArgs = [...openClawGlobalArgs(args), ...commandArgs];
+  const result = spawnSync("openclaw", fullArgs, {
     encoding: "utf8",
     stdio: ["ignore", "pipe", "pipe"],
     timeout: timeoutMs,
@@ -196,7 +242,7 @@ function runOpenClaw(args: string[], timeoutMs: number): CommandEvidence {
   const stderr = redactText(result.stderr || result.error?.message || "");
   const json = parseJsonObject(stdout.trim());
   return {
-    args,
+    args: redactCommandArgs(["openclaw", ...fullArgs]),
     exitCode: result.status,
     json: redactValue(json),
     ok: result.status === 0,
@@ -206,12 +252,20 @@ function runOpenClaw(args: string[], timeoutMs: number): CommandEvidence {
   };
 }
 
-function openClawInvokeArgs(nodeName: string, command: string, params: unknown, timeoutMs: number) {
+export function redactCommandArgs(args: string[]) {
+  return args.map((arg, index) => {
+    const previous = args[index - 1] || "";
+    if (/^--(?:token|password)$/i.test(previous)) return "<redacted>";
+    return redactText(arg);
+  });
+}
+
+function openClawInvokeArgs(args: ParsedArgs, command: string, params: unknown, timeoutMs: number) {
   return [
     "nodes",
     "invoke",
     "--node",
-    nodeName,
+    args.nodeName,
     "--command",
     command,
     "--params",
@@ -219,6 +273,17 @@ function openClawInvokeArgs(nodeName: string, command: string, params: unknown, 
     "--timeout",
     String(timeoutMs),
     "--json",
+    ...(args.openclawUrl ? ["--url", args.openclawUrl] : []),
+    ...(args.openclawToken ? ["--token", args.openclawToken] : []),
+  ];
+}
+
+function openClawGatewayArgs(args: ParsedArgs, commandArgs: string[]) {
+  return [
+    ...commandArgs,
+    "--json",
+    ...(args.openclawUrl ? ["--url", args.openclawUrl] : []),
+    ...(args.openclawToken ? ["--token", args.openclawToken] : []),
   ];
 }
 
@@ -250,26 +315,51 @@ async function collectSimulatorEvidence(args: ParsedArgs, outDir: string): Promi
 
 function collectOpenClawEvidence(args: ParsedArgs): OpenClawEvidence {
   const evidence: OpenClawEvidence = {
+    context: {
+      authProvided: Boolean(args.openclawToken),
+      container: args.openclawContainer,
+      profile: args.openclawProfile,
+      url: args.openclawUrl,
+    },
     enabled: !args.skipOpenClaw,
     liveCanvas: args.liveCanvas,
     nodeName: args.nodeName,
   };
   if (args.skipOpenClaw) return evidence;
-  evidence.deviceStatus = runOpenClaw(
-    openClawInvokeArgs(args.nodeName, "device.status", {}, args.openclawTimeoutMs),
+  evidence.nodeStatus = runOpenClaw(
+    args,
+    openClawGatewayArgs(args, ["nodes", "status"]),
     args.openclawTimeoutMs + 1_000,
   );
   if (args.liveCanvas) {
     evidence.canvasPresent = runOpenClaw(
-      openClawInvokeArgs(args.nodeName, "canvas.present", { text: args.canvasText }, args.openclawTimeoutMs),
+      args,
+      openClawInvokeArgs(args, "canvas.present", { text: args.canvasText }, args.openclawTimeoutMs),
       args.openclawTimeoutMs + 1_000,
     );
   }
   evidence.canvasSnapshot = runOpenClaw(
-    openClawInvokeArgs(args.nodeName, "canvas.snapshot", {}, args.openclawTimeoutMs),
+    args,
+    openClawInvokeArgs(args, "canvas.snapshot", {}, args.openclawTimeoutMs),
     args.openclawTimeoutMs + 1_000,
   );
   return evidence;
+}
+
+function commandJsonRecord(command: CommandEvidence | undefined) {
+  if (!command?.json || typeof command.json !== "object" || Array.isArray(command.json)) return null;
+  return command.json as Record<string, unknown>;
+}
+
+function nodeStatusHasConnectedNode(openclaw: OpenClawEvidence) {
+  const record = commandJsonRecord(openclaw.nodeStatus);
+  const nodes = record?.nodes;
+  if (!Array.isArray(nodes)) return false;
+  return nodes.some((node) => {
+    if (!node || typeof node !== "object" || Array.isArray(node)) return false;
+    const entry = node as Record<string, unknown>;
+    return entry.connected === true && (entry.displayName === openclaw.nodeName || entry.nodeId === openclaw.nodeName);
+  });
 }
 
 function deterministicChecks(simulator: SimulatorEvidence, openclaw: OpenClawEvidence) {
@@ -285,9 +375,9 @@ function deterministicChecks(simulator: SimulatorEvidence, openclaw: OpenClawEvi
       detail: simulator.enabled ? `${simulator.glassStates.length} e2e glass state marker(s)` : "simulator skipped",
     },
     {
-      name: "openclaw-device-status",
-      ok: !openclaw.enabled || openclaw.deviceStatus?.ok === true,
-      detail: openclaw.enabled ? openclaw.deviceStatus?.stderr || openclaw.deviceStatus?.stdout || "device.status ok" : "OpenClaw skipped",
+      name: "openclaw-node-status",
+      ok: !openclaw.enabled || (openclaw.nodeStatus?.ok === true && nodeStatusHasConnectedNode(openclaw)),
+      detail: openclaw.enabled ? openclaw.nodeStatus?.stderr || openclaw.nodeStatus?.stdout || "nodes status ok" : "OpenClaw skipped",
     },
     {
       name: "openclaw-canvas-snapshot",
@@ -332,7 +422,7 @@ Review rules:
 - Do fail phone-chat, provider-key, model-picker, or Gateway-settings ownership regressions.
 - Use screenshots as visual evidence and state/OpenClaw data as semantic evidence.
 - Mark missing evidence as inconclusive instead of guessing.
-- If OpenClaw node evidence exists, compare device.status / canvas.snapshot with the simulator state.
+- If OpenClaw node evidence exists, compare nodes.status / canvas.snapshot with the simulator state.
 
 Return JSON in this shape:
 
@@ -396,9 +486,14 @@ async function main() {
   const userStoriesSnapshotPath = path.join(args.outDir, "user-stories.md.snapshot");
   fs.copyFileSync(userStoriesSource, userStoriesSnapshotPath);
 
+  const openclawFirst = args.liveCanvas && !args.skipOpenClaw;
+  const openclaw = openclawFirst
+    ? collectOpenClawEvidence(args)
+    : undefined;
+  if (openclawFirst) await sleep(500);
   const simulator = await collectSimulatorEvidence(args, args.outDir);
-  const openclaw = collectOpenClawEvidence(args);
-  const deterministic = deterministicChecks(simulator, openclaw);
+  const resolvedOpenClaw = openclaw ?? collectOpenClawEvidence(args);
+  const deterministic = deterministicChecks(simulator, resolvedOpenClaw);
   const evidencePath = path.join(args.outDir, "evidence.json");
   const manifestPath = path.join(args.outDir, "manifest.json");
   const reviewPromptPath = path.join(args.outDir, "review-prompt.md");
@@ -407,7 +502,7 @@ async function main() {
 
   const evidence = {
     deterministic,
-    openclaw,
+    openclaw: resolvedOpenClaw,
     simulator,
   };
   writeJson(evidencePath, evidence);
