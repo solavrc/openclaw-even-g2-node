@@ -792,6 +792,65 @@ describe("Gateway direct transcript history", () => {
     });
   });
 
+  it("ignores unmatched legacy pending rows after the current node is identified", async () => {
+    const request = vi.fn(async (method: string) => {
+      if (method === "node.list") {
+        return {
+          nodes: [
+            {
+              nodeId: "node-current",
+              deviceId: "device-current",
+              displayName: "Even G2",
+              platform: "even-g2",
+              deviceFamily: "glasses",
+              approvalState: "approved",
+              commands: ["canvas.present"],
+            },
+            {
+              nodeId: "node-legacy-pending",
+              displayName: "Even G2",
+              platform: "even-g2",
+              deviceFamily: "glasses",
+              approvalState: "pending-approval",
+              pendingRequestId: "request-legacy",
+              pendingDeclaredCommands: ["talk.ptt.once"],
+            },
+          ],
+        };
+      }
+      return {};
+    });
+    const gateway = new GatewayDirectTransport({
+      setupCodeOrUrl: "ws://127.0.0.1:18789",
+      token: "",
+    });
+    const messages: Array<Record<string, unknown>> = [];
+    gateway.addEventListener("message", (event) => {
+      messages.push(JSON.parse((event as MessageEvent).data as string) as Record<string, unknown>);
+    });
+    Reflect.set(gateway, "operatorSession", { request });
+    Reflect.set(gateway, "connectedDeviceId", "device-current");
+    Reflect.set(gateway, "nodeApprovalPending", true);
+
+    const refreshNodeApprovalStatus = Reflect.get(gateway, "refreshNodeApprovalStatus");
+    if (typeof refreshNodeApprovalStatus !== "function") throw new Error("GatewayDirectTransport.refreshNodeApprovalStatus is unavailable");
+    await refreshNodeApprovalStatus.call(gateway);
+
+    expect(messages).toContainEqual({
+      type: "eveng2.runtime.status",
+      session: "",
+      node: expect.objectContaining({
+        nodeId: "node-current",
+        deviceId: "device-current",
+      }),
+    });
+    expect(messages).toContainEqual({ type: "eveng2.node.approval.ready" });
+    expect(messages).not.toContainEqual(expect.objectContaining({
+      type: "eveng2.node.approval.required",
+      nodeId: "node-legacy-pending",
+    }));
+  });
+
   it("clears node command approval when node.list has no pending Even G2 node", async () => {
     const request = vi.fn(async (method: string) => {
       if (method === "node.list") {

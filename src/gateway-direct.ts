@@ -1268,7 +1268,7 @@ export class GatewayDirectTransport extends EventTarget {
       const byDeviceId = nodes.find((node) => nodeDeviceId(node) === this.connectedDeviceId);
       if (byDeviceId) return byDeviceId;
       const rowsWithDeviceId = nodes.filter((node) => nodeDeviceId(node));
-      if (rowsWithDeviceId.length === 0 && nodes.length === 1) return nodes[0];
+      if (!this.connectedNodeId && rowsWithDeviceId.length === 0 && nodes.length === 1) return nodes[0];
     }
     if (this.connectedNodeId || this.connectedDeviceId) return undefined;
     return nodes[0];

@@ -2002,7 +2002,7 @@ export function App() {
   function handleGatewayErrorMessage(msg: GatewayErrorMessage) {
     const nextStatus = gatewayErrorStatusFromMessage(msg);
     const plan = connectionErrorPresentationPlan(nextStatus, msg.error, Boolean(gatewayUrlRef.current.trim()));
-    reconnectPausedRef.current = msg.pauseReconnect === true;
+    reconnectPausedRef.current = msg.pauseReconnect === true || plan.reconnectReason === "";
     setStatus(nextStatus);
     if (plan.target === "guidance") void renderConnectionGuidance(plan.statusText);
     else void renderGlass(plan.frame);
