@@ -9,6 +9,7 @@ export type SimulatorFixtureMode =
   | "session"
   | "voiceReview"
   | "canvas"
+  | "emojiProbe"
   | "canvasTutorial"
   | "approval"
   | "recovery"
@@ -125,6 +126,7 @@ export const VOICE_REVIEW_FIXTURE_DRAFT: VoiceDraft = {
 };
 
 export const CANVAS_FIXTURE_TEXT = "main · note · 1/1\n\nDeploy finished - 2 services updated, 0 errors.\n\npushed by gateway";
+export const EMOJI_PROBE_DEFAULT_TEXT = "Emoji probe\n\n⚙️ 🔌 🔊 🪢 👍 ❤️ ☀️ ★\n\nwatch simulator LVGL glyph warnings";
 
 export const APPROVAL_FIXTURE: PendingApproval = {
   ask: null,
@@ -146,11 +148,17 @@ export type SimulatorFixtureViewPlan =
   | { action: "store-voice"; pendingSessionVoice: PendingSessionVoice; voiceText: string }
   | { action: "voice-review"; draft: VoiceDraft; transcript: SessionTranscriptMessage[] }
   | { action: "canvas"; text: string }
+  | { action: "emoji-probe"; text: string }
   | { action: "canvas-tutorial" }
   | { action: "approval"; approval: PendingApproval }
   | { action: "recovery"; frame: typeof RECOVERY_FIXTURE_FRAME };
 
-export function simulatorFixtureViewPlan(mode: SimulatorFixtureMode): SimulatorFixtureViewPlan {
+export function simulatorEmojiProbeTextFromSearch(search: string) {
+  const value = new URLSearchParams(search).get("emojiText") || "";
+  return value.trim() || EMOJI_PROBE_DEFAULT_TEXT;
+}
+
+export function simulatorFixtureViewPlan(mode: SimulatorFixtureMode, search = ""): SimulatorFixtureViewPlan {
   if (mode === "storeVoice") {
     return {
       action: "store-voice",
@@ -166,6 +174,7 @@ export function simulatorFixtureViewPlan(mode: SimulatorFixtureMode): SimulatorF
     };
   }
   if (mode === "canvas") return { action: "canvas", text: CANVAS_FIXTURE_TEXT };
+  if (mode === "emojiProbe") return { action: "emoji-probe", text: simulatorEmojiProbeTextFromSearch(search) };
   if (mode === "canvasTutorial") return { action: "canvas-tutorial" };
   if (mode === "approval") return { action: "approval", approval: APPROVAL_FIXTURE };
   if (mode === "recovery") return { action: "recovery", frame: RECOVERY_FIXTURE_FRAME };
@@ -176,6 +185,7 @@ export function isSimulatorFixtureMode(value: string): value is SimulatorFixture
   return value === "session"
     || value === "voiceReview"
     || value === "canvas"
+    || value === "emojiProbe"
     || value === "canvasTutorial"
     || value === "approval"
     || value === "recovery"

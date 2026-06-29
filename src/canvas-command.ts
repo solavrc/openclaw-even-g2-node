@@ -1,3 +1,5 @@
+import { cleanGlassText } from "./glass-text";
+
 export type CanvasImagePayload = {
   dataUrl: string;
   alt: string;
@@ -217,7 +219,7 @@ export function imageCanvasPresentationState(payload: CanvasImagePayload): Canva
 }
 
 export function textCanvasPresentationState(text: string): CanvasPresentationState {
-  const glassText = textCanvasGlassText(text);
+  const glassText = textCanvasGlassText(cleanGlassText(text));
   return {
     mode: "text",
     text: glassText,
