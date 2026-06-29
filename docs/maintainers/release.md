@@ -198,6 +198,16 @@ whose source manifest is missing or older than the current simulator/UI source.
 This does not replace visual review; it prevents accidentally bundling
 screenshots from a previous UI revision.
 
+## Release Versioning
+
+Patch version bumps are reserved for local Even Hub package checks, where
+installing frequent `.ehpk` builds is part of hardware validation. Release
+Please uses a minor-version cadence so published GitHub releases represent
+reviewable integration checkpoints instead of local package iterations.
+
+Use an explicit Release Please `Release-As` footer when a future release needs a
+major version instead of the default minor bump.
+
 ## Release Notes
 
 Version `0.1.17`: <!-- x-release-please-version -->

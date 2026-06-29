@@ -5,8 +5,7 @@
       "release-type": "node",
       "package-name": "@solavrc/openclaw-even-g2-node",
       "changelog-path": "CHANGELOG.md",
-      "bump-minor-pre-major": true,
-      "bump-patch-for-minor-pre-major": true,
+      "versioning": "always-bump-minor",
       "extra-files": [
         {
           "type": "json",
