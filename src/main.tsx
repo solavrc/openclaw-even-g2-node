@@ -163,6 +163,7 @@ import {
 } from "./canvas-command";
 import type { CanvasImagePayload, CanvasMode, CanvasPresentationKind, CanvasPresentationState } from "./canvas-command";
 import {
+  CanvasImageSourceTooLargeError,
   canvasImagePayloadToTiles,
   canvasTutorialFrameDelayMs,
   canvasTutorialImageDataUrl,
@@ -2224,6 +2225,10 @@ export function App() {
         height: GLASS_CANVAS_HEIGHT,
       }));
     } catch (error) {
+      if (error instanceof CanvasImageSourceTooLargeError) {
+        sendNodeCommandResult(id, false, {}, canvasImageTooLargeError({ maxPixels: error.maxPixels }));
+        return;
+      }
       const message = error instanceof Error ? error.message : String(error);
       sendNodeCommandResult(id, false, {}, canvasImageFailedError(message));
     }
