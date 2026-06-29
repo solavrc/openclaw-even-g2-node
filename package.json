@@ -54,7 +54,7 @@
     "release:bundle:summary": "tsx scripts/release-bundle.ts --summary",
     "release:status": "tsx scripts/release-status.ts",
     "release:status:summary": "tsx scripts/release-status.ts --summary",
-    "audit:all": "pnpm ci && pnpm release:bundle:summary && pnpm release:status:summary"
+    "audit:all": "pnpm run ci && pnpm release:bundle:summary && pnpm release:status:summary"
   },
   "dependencies": {
     "@evenrealities/even_hub_sdk": "^0.0.11",

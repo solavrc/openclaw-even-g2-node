@@ -76,7 +76,7 @@ and recreate state immediately.
 
 ```bash
 pnpm check
-pnpm ci
+pnpm run ci
 pnpm dev
 pnpm sim:dev
 pnpm sim:capture
