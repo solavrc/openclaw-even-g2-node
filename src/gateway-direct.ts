@@ -820,7 +820,10 @@ export class GatewayDirectTransport extends EventTarget {
       permissions: {},
       client: buildEvenG2ClientInfo("node", this.instanceId, clientId),
       onOpen: (_hello, identity) => {
-        if (this.nodeSession !== session || this.readyState === WebSocket.CLOSED) return;
+        if (this.nodeSession !== session || this.readyState === WebSocket.CLOSED) {
+          session.close();
+          return;
+        }
         this.connectedDeviceId = identity.deviceId;
         this.nodeSessionOpen = true;
         this.emit({
@@ -1262,8 +1265,12 @@ export class GatewayDirectTransport extends EventTarget {
       if (byNodeId) return byNodeId;
     }
     if (this.connectedDeviceId) {
-      return nodes.find((node) => nodeDeviceId(node) === this.connectedDeviceId);
+      const byDeviceId = nodes.find((node) => nodeDeviceId(node) === this.connectedDeviceId);
+      if (byDeviceId) return byDeviceId;
+      const rowsWithDeviceId = nodes.filter((node) => nodeDeviceId(node));
+      if (rowsWithDeviceId.length === 0 && nodes.length === 1) return nodes[0];
     }
+    if (this.connectedNodeId || this.connectedDeviceId) return undefined;
     return nodes[0];
   }
 
