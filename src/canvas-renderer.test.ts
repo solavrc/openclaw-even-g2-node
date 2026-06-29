@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
+  CANVAS_IMAGE_MAX_SOURCE_PIXELS,
   CANVAS_TUTORIAL_REQUEST,
+  CanvasImageSourceTooLargeError,
+  assertCanvasImageSourceSize,
   canvasImageFitRect,
   canvasImageTilePlans,
   canvasTutorialFrameDelayMs,
@@ -88,6 +91,13 @@ describe("canvas renderer helpers", () => {
       height: 288,
     });
     expect(() => canvasImageFitRect(0, 288)).toThrow("Canvas image has no dimensions.");
+  });
+
+  it("rejects decoded image sources that are too large for safe downscaling", () => {
+    expect(() => assertCanvasImageSourceSize(1920, 1080)).not.toThrow();
+    expect(() => assertCanvasImageSourceSize(CANVAS_IMAGE_MAX_SOURCE_PIXELS + 1, 1)).toThrow(
+      CanvasImageSourceTooLargeError,
+    );
   });
 
   it("splits image canvas payloads into the Even G2 2x2 tile layout", () => {

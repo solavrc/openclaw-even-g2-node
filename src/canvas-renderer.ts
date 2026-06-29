@@ -21,6 +21,17 @@ export type CanvasTutorialStep = 0 | 1 | 2;
 
 export const CANVAS_TUTORIAL_REQUEST = "Hey Claw, create a tiny visual surprise for my Even G2 glasses.";
 export const CANVAS_TUTORIAL_FRAMES_MS = [1200, 1400, 0] as const;
+export const CANVAS_IMAGE_MAX_SOURCE_PIXELS = GLASS_CANVAS_WIDTH * GLASS_CANVAS_HEIGHT * 16;
+
+export class CanvasImageSourceTooLargeError extends Error {
+  constructor(
+    readonly sourcePixels: number,
+    readonly maxPixels: number,
+  ) {
+    super(`Canvas image source is too large. Send an image with no more than ${maxPixels} decoded pixels.`);
+    this.name = "CanvasImageSourceTooLargeError";
+  }
+}
 
 export function canvasTutorialFrameDelayMs(step: CanvasTutorialStep) {
   return CANVAS_TUTORIAL_FRAMES_MS[step];
@@ -49,6 +60,14 @@ export function canvasImageFitRect(sourceWidth: number, sourceHeight: number) {
     width,
     height,
   };
+}
+
+export function assertCanvasImageSourceSize(sourceWidth: number, sourceHeight: number) {
+  if (!sourceWidth || !sourceHeight) throw new Error("Canvas image has no dimensions.");
+  const sourcePixels = sourceWidth * sourceHeight;
+  if (sourcePixels > CANVAS_IMAGE_MAX_SOURCE_PIXELS) {
+    throw new CanvasImageSourceTooLargeError(sourcePixels, CANVAS_IMAGE_MAX_SOURCE_PIXELS);
+  }
 }
 
 export function canvasImageTilePlans() {
@@ -219,6 +238,7 @@ export async function canvasImagePayloadToTiles(payload: CanvasImagePayload): Pr
 
   const sourceWidth = image.naturalWidth || image.width;
   const sourceHeight = image.naturalHeight || image.height;
+  assertCanvasImageSourceSize(sourceWidth, sourceHeight);
   const fit = canvasImageFitRect(sourceWidth, sourceHeight);
 
   const canvas = document.createElement("canvas");

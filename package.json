@@ -40,6 +40,7 @@
     "sim:run": "pnpm simulator http://127.0.0.1:35162/openclaw-even-g2-node/ --automation-port 9898",
     "sim:capture": "tsx scripts/evenhub-simulator-capture.ts",
     "sim:e2e": "tsx scripts/evenhub-simulator-e2e.ts",
+    "sim:emoji-glyphs": "tsx scripts/evenhub-emoji-glyph-audit.ts",
     "sim:fixtures": "tsx scripts/evenhub-simulator-fixtures.ts",
     "e2e:agent": "tsx scripts/e2e-agent-review.ts",
     "e2e:agent:live": "tsx scripts/e2e-agent-review.ts --openclaw-live-canvas",

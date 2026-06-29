@@ -1,5 +1,6 @@
 import type { DeviceInfo, DeviceStatus } from "@evenrealities/even_hub_sdk";
 import { CANVAS_IMAGE_MAX_INLINE_BYTES } from "./canvas-command";
+import { CANVAS_IMAGE_MAX_SOURCE_PIXELS } from "./canvas-renderer";
 import { serializableDeviceInfo, serializableDeviceStatus } from "./even-device-status";
 
 export const OPENCLAW_NODE_COMMANDS = [
@@ -64,10 +65,17 @@ export function canvasImageUrlUnsupportedError(): NodeCommandError {
   };
 }
 
-export function canvasImageTooLargeError(maxBytes = CANVAS_IMAGE_MAX_INLINE_BYTES): NodeCommandError {
+export function canvasImageTooLargeError(
+  limit: number | { maxBytes?: number; maxPixels?: number } = CANVAS_IMAGE_MAX_INLINE_BYTES,
+): NodeCommandError {
+  const maxBytes = typeof limit === "number" ? limit : limit.maxBytes;
+  const maxPixels = typeof limit === "number" ? undefined : limit.maxPixels;
+  const limitText = typeof maxPixels === "number"
+    ? `${maxPixels} decoded pixels`
+    : `${maxBytes ?? CANVAS_IMAGE_MAX_INLINE_BYTES} bytes`;
   return {
     code: "CANVAS_IMAGE_TOO_LARGE",
-    message: `Image canvas inline payload is too large. Send data:image/... or base64 image data no larger than ${maxBytes} bytes.`,
+    message: `Image canvas input is too large. Send data:image/... or base64 image data no larger than ${limitText}.`,
   };
 }
 
@@ -148,6 +156,7 @@ export function deviceInfoCommandResult(options: DeviceInfoResultOptions) {
       imagePayloadFields: CANVAS_IMAGE_PAYLOAD_FIELDS,
       imageMimeTypes: CANVAS_IMAGE_MIME_TYPES,
       maxInlineImageBytes: CANVAS_IMAGE_MAX_INLINE_BYTES,
+      maxImagePixels: CANVAS_IMAGE_MAX_SOURCE_PIXELS,
       remoteImageUrls: false,
     },
   };

@@ -209,7 +209,7 @@ async function runFixtureSmoke(flow: FixtureFlow) {
   let devServer: ChildProcess | null = null;
   let simulator: ChildProcess | null = null;
   try {
-    devServer = spawnProcess("pnpm", ["dev", "--", "--host", "127.0.0.1", "--port", String(appPort), "--strictPort"]);
+    devServer = spawnProcess("pnpm", ["exec", "vite", "--host", "127.0.0.1", "--port", String(appPort), "--strictPort"]);
     const appUrl = `http://127.0.0.1:${appPort}/?resetPairing=1&simFixture=${flow}`;
     await waitForHttp(`http://127.0.0.1:${appPort}/`);
 

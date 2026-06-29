@@ -11,12 +11,14 @@ import {
 function fakeBridge() {
   const calls = {
     create: 0,
+    createArgs: [] as unknown[],
     rebuild: 0,
     upgrade: [] as unknown[],
   };
   const bridge = {
-    createStartUpPageContainer: async () => {
+    createStartUpPageContainer: async (input: unknown) => {
       calls.create += 1;
+      calls.createArgs.push(input);
       return 0;
     },
     rebuildPageContainer: async () => {
@@ -29,6 +31,10 @@ function fakeBridge() {
     },
   };
   return { bridge, calls };
+}
+
+function payloadText(value: unknown) {
+  return JSON.stringify(value);
 }
 
 describe("glass renderer helpers", () => {
@@ -82,5 +88,24 @@ describe("glass renderer helpers", () => {
 
     await expect(renderGlassVoicePanelFrame(bridge, { ...frame, body: "draft changed" })).resolves.toBe(true);
     expect(calls.upgrade).toHaveLength(1);
+  });
+
+  it("normalizes unsupported glyphs in voice panel text containers", async () => {
+    const { bridge, calls } = fakeBridge();
+    const frame = {
+      base: { header: "main · ready", body: "session text", hint: "tap speak" },
+      title: "Review voice",
+      body: "draft 🔌",
+      hint: "tap ▶️",
+    };
+    await expect(renderGlassVoicePanelFrame(bridge, frame)).resolves.toBe(true);
+    expect(payloadText(calls.createArgs[0])).toContain("[emoji]");
+    expect(payloadText(calls.createArgs[0])).toContain("tap ▶");
+    expect(payloadText(calls.createArgs[0])).not.toContain("🔌");
+    expect(payloadText(calls.createArgs[0])).not.toContain("▶️");
+
+    await expect(renderGlassVoicePanelFrame(bridge, { ...frame, body: "changed 🪢" })).resolves.toBe(true);
+    expect(payloadText(calls.upgrade[0])).toContain("[emoji]");
+    expect(payloadText(calls.upgrade[0])).not.toContain("🪢");
   });
 });

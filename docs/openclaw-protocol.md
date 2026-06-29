@@ -242,8 +242,8 @@ Image canvas input should be inline image data. Remote image URLs are rejected
 by this app because the Even Hub package should not fetch arbitrary remote
 media on behalf of OpenClaw. Gateway or the invoking agent should fetch or
 generate the image, convert it to an inline `data:image/...` URL or base64
-payload within `device.info.canvas.maxInlineImageBytes`, and then invoke
-`canvas.present`.
+payload within `device.info.canvas.maxInlineImageBytes` and
+`device.info.canvas.maxImagePixels`, and then invoke `canvas.present`.
 
 The glasses display is 576x288. The app scales image canvas payloads to fit
 that display and sends the result to Even Hub as tiled image containers.
