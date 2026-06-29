@@ -319,7 +319,8 @@ reconnect from the saved setup when foregrounded again.
 OpenClaw can send text or inline image canvas updates to the `Even G2` node.
 Text is shown directly on the glasses HUD. Image canvas updates are accepted as
 inline `data:image/...` URLs or base64 image data and are rendered to the
-576x288 glasses display.
+576x288 glasses display. OpenClaw agents can inspect `device.info` for the
+current inline image size limit before sending generated image data.
 Short-lived message and notification presentations use the same
 `canvas.present` command with `kind: "message"` or `kind: "notification"`.
 

@@ -1,9 +1,11 @@
 import { DeviceConnectType, DeviceInfo, DeviceModel, DeviceStatus } from "@evenrealities/even_hub_sdk";
 import { describe, expect, it } from "vitest";
+import { CANVAS_IMAGE_MAX_INLINE_BYTES } from "./canvas-command";
 import {
   CANVAS_COMMANDS,
   OPENCLAW_NODE_COMMANDS,
   canvasImageFailedError,
+  canvasImageTooLargeError,
   canvasImageUrlUnsupportedError,
   deviceHealthCommandResult,
   deviceInfoCommandResult,
@@ -81,6 +83,7 @@ describe("deviceInfoCommandResult", () => {
         height: 288,
         commands: CANVAS_COMMANDS,
         presentKinds: ["canvas", "message", "notification"],
+        maxInlineImageBytes: CANVAS_IMAGE_MAX_INLINE_BYTES,
         remoteImageUrls: false,
       },
       device: {
@@ -185,6 +188,10 @@ describe("node command message helpers", () => {
     });
     expect(canvasImageUrlUnsupportedError()).toMatchObject({
       code: "CANVAS_IMAGE_URL_UNSUPPORTED",
+    });
+    expect(canvasImageTooLargeError()).toEqual({
+      code: "CANVAS_IMAGE_TOO_LARGE",
+      message: `Image canvas inline payload is too large. Send data:image/... or base64 image data no larger than ${CANVAS_IMAGE_MAX_INLINE_BYTES} bytes.`,
     });
     expect(canvasImageFailedError("bad image")).toEqual({
       code: "CANVAS_IMAGE_FAILED",

@@ -7,6 +7,15 @@ ed25519.hashes.sha512 = sha512;
 ed25519.hashes.sha512Async = (message) => Promise.resolve(sha512(message));
 
 const TALK_RELAY_FINAL_SILENCE_MS = 1200;
+const GATEWAY_AUTH_URL_SETUP_PARAMS = new Set([
+  "bootstrap",
+  "bootstrap_token",
+  "bootstraptoken",
+  "setup",
+  "setupcode",
+  "setup_token",
+  "setuptoken",
+]);
 
 export type GatewayRole = "node" | "operator";
 
@@ -111,6 +120,12 @@ export type RpcResult<T = unknown> = {
   ok: boolean;
   payload?: T;
   error?: GatewayErrorShape;
+};
+
+type PendingGatewayRequest = {
+  reject: (error: Error) => void;
+  resolveResult: (result: RpcResult) => void;
+  timeout: ReturnType<typeof window.setTimeout>;
 };
 
 function gatewayEventPayload(frame: Extract<GatewayFrame, { type: "event" }>) {
@@ -345,9 +360,12 @@ export function normalizedGatewayAuthUrl(gatewayUrl: string) {
     const url = new URL(trimmed);
     url.username = "";
     url.password = "";
-    url.search = "";
     url.hash = "";
-    return url.toString().toLowerCase();
+    for (const key of [...url.searchParams.keys()]) {
+      if (GATEWAY_AUTH_URL_SETUP_PARAMS.has(key.toLowerCase())) url.searchParams.delete(key);
+    }
+    url.searchParams.sort();
+    return url.toString();
   } catch {
     return trimmed.toLowerCase();
   }
@@ -450,9 +468,11 @@ export async function buildConnectParams({
 export class GatewayWsSession {
   private ws: GatewayWebSocket | null = null;
   private hello: unknown = null;
-  private readonly pending = new Map<string, (result: RpcResult) => void>();
+  private readonly pending = new Map<string, PendingGatewayRequest>();
   private readonly identityStore: DeviceIdentitySigner;
   private readonly authStore: DeviceAuthStorage;
+  private closed = false;
+  private generation = 0;
 
   constructor(private readonly options: GatewayConnectOptions) {
     this.identityStore = options.identityStore || new BrowserDeviceIdentityStore();
@@ -465,25 +485,43 @@ export class GatewayWsSession {
 
   async connect() {
     const WebSocketCtor = this.options.WebSocketCtor || WebSocket;
+    const generation = this.generation + 1;
+    this.generation = generation;
+    this.closed = false;
     const identity = await this.identityStore.loadOrCreate();
+    if (!this.isCurrentGeneration(generation)) return;
     const ws = new WebSocketCtor(this.options.url);
+    if (!this.isCurrentGeneration(generation)) {
+      ws.close();
+      return;
+    }
     this.ws = ws;
     ws.addEventListener("message", (event) => {
-      void this.handleMessage(String(event.data), identity);
+      if (!this.isCurrentSocket(ws, generation)) return;
+      void this.handleMessage(String(event.data), identity, ws, generation);
     });
     ws.addEventListener("close", (event) => {
+      if (!this.isCurrentSocket(ws, generation)) return;
+      this.closed = true;
+      this.ws = null;
       this.hello = null;
+      this.rejectPending(new Error(closeReasonFromEvent(event) || "gateway session closed"));
       this.options.onClose?.(event);
     });
     ws.addEventListener("error", () => {
+      if (!this.isCurrentSocket(ws, generation)) return;
       this.options.onError?.(new Error("gateway websocket error"));
     });
   }
 
   close() {
-    this.ws?.close();
+    this.closed = true;
+    this.generation += 1;
+    const ws = this.ws;
     this.ws = null;
     this.hello = null;
+    this.rejectPending(new Error("gateway session closed"));
+    ws?.close();
   }
 
   request<T = unknown>(method: string, params?: unknown, timeoutMs = 15000): Promise<T> {
@@ -495,13 +533,40 @@ export class GatewayWsSession {
         this.pending.delete(id);
         reject(new Error(`${method} timed out`));
       }, timeoutMs);
-      this.pending.set(id, (result) => {
-        window.clearTimeout(timeout);
-        if (result.ok) resolve(result.payload as T);
-        else reject(new Error(result.error?.message || result.error?.code || `${method} failed`));
+      this.pending.set(id, {
+        reject,
+        resolveResult: (result) => {
+          this.pending.delete(id);
+          window.clearTimeout(timeout);
+          if (result.ok) resolve(result.payload as T);
+          else reject(new Error(result.error?.message || result.error?.code || `${method} failed`));
+        },
+        timeout,
       });
       ws.send(gatewayRpcRequestText(id, method, params));
     });
+  }
+
+  private isCurrentGeneration(generation: number) {
+    return !this.closed && this.generation === generation;
+  }
+
+  private isCurrentSocket(ws: GatewayWebSocket, generation: number) {
+    return this.ws === ws && this.isCurrentGeneration(generation);
+  }
+
+  private rejectPending(error: Error) {
+    for (const [id, pending] of this.pending) {
+      this.pending.delete(id);
+      window.clearTimeout(pending.timeout);
+      pending.reject(error);
+    }
+  }
+
+  private resolvePending(id: string, result: RpcResult) {
+    const pending = this.pending.get(id);
+    if (!pending) return;
+    pending.resolveResult(result);
   }
 
   sendRequestFrame(method: string, params?: unknown) {
@@ -509,7 +574,9 @@ export class GatewayWsSession {
     this.ws?.send(gatewayRpcRequestText(id, method, params));
   }
 
-  private async handleMessage(text: string, identity: DeviceIdentity) {
+  private async handleMessage(text: string, identity: DeviceIdentity, ws = this.ws, generation = this.generation) {
+    if (ws && !this.isCurrentSocket(ws, generation)) return;
+    if (!ws && this.closed) return;
     let frame: GatewayFrame;
     try {
       frame = JSON.parse(text) as GatewayFrame;
@@ -518,14 +585,17 @@ export class GatewayWsSession {
     }
     if (frame.type === "res") {
       if (frame.id === "__connect__" && frame.ok) {
+        if (ws && !this.isCurrentSocket(ws, generation)) return;
+        if (!ws && this.closed) return;
         this.hello = frame.payload;
         this.persistAuth(frame.payload, identity.deviceId);
         this.options.onOpen?.(frame.payload, identity);
       } else if (frame.id === "__connect__" && !frame.ok) {
+        if (ws && !this.isCurrentSocket(ws, generation)) return;
+        if (!ws && this.closed) return;
         this.options.onError?.(new GatewayConnectError(frame.error?.message || frame.error?.details?.code || frame.error?.code || "gateway connect failed", frame.error));
       }
-      this.pending.get(frame.id)?.({ ok: frame.ok, payload: frame.payload, error: frame.error });
-      this.pending.delete(frame.id);
+      this.resolvePending(frame.id, { ok: frame.ok, payload: frame.payload, error: frame.error });
       return;
     }
     if (frame.type !== "event") return;
@@ -541,7 +611,12 @@ export class GatewayWsSession {
         options: this.options,
         storedAuth: this.authStore.load(identity.deviceId, this.options.role, this.options.url),
       });
-      this.ws?.send(gatewayRpcRequestText("__connect__", "connect", params));
+      if (ws) {
+        if (!this.isCurrentSocket(ws, generation)) return;
+        ws.send(gatewayRpcRequestText("__connect__", "connect", params));
+      } else {
+        this.ws?.send(gatewayRpcRequestText("__connect__", "connect", params));
+      }
       return;
     }
     this.options.onEvent?.(frame.event, payload);
@@ -914,7 +989,7 @@ export class GatewayDirectTransport extends EventTarget {
   }
 
   private connectOperator() {
-    this.operatorSession = new GatewayWsSession({
+    const session = new GatewayWsSession({
       url: this.setup.url,
       token: this.options.token,
       bootstrapToken: this.setup.bootstrapToken,
@@ -929,6 +1004,10 @@ export class GatewayDirectTransport extends EventTarget {
       client: buildEvenG2ClientInfo("ui", this.instanceId, this.gatewayClientId),
       userAgent: `OpenClawNode/${APP_VERSION} (Even G2)`,
       onOpen: (hello) => {
+        if (this.operatorSession !== session || this.readyState === WebSocket.CLOSED) {
+          session.close();
+          return;
+        }
         const snapshot = asObject(asObject(hello)?.snapshot);
         const defaults = asObject(snapshot?.sessionDefaults);
         const mainSessionKey = asString(defaults?.mainSessionKey);
@@ -937,18 +1016,29 @@ export class GatewayDirectTransport extends EventTarget {
         this.dispatchEvent(new Event("open"));
         this.emit({ type: "ready", service: "openclaw-gateway-direct" });
         this.emit({ type: "eveng2.session.config.snapshot", sessionKey: this.selectedSessionKey });
-        void this.operatorSession?.request("sessions.subscribe", undefined, 5000).catch(() => undefined);
+        void session.request("sessions.subscribe", undefined, 5000).catch(() => undefined);
         this.scheduleNodeApprovalPoll(0);
       },
-      onEvent: (event, payload) => this.handleOperatorEvent(event, payload),
-      onError: (error) => this.fail(error),
+      onEvent: (event, payload) => {
+        if (this.operatorSession !== session) return;
+        this.handleOperatorEvent(event, payload);
+      },
+      onError: (error) => {
+        if (this.operatorSession !== session) return;
+        this.fail(error);
+      },
       onClose: (event) => {
+        if (this.operatorSession !== session) return;
         const reason = closeReasonFromEvent(event);
         if (reason) this.fail(new Error(reason));
         this.close(undefined, reason);
       },
     });
-    void this.operatorSession.connect().catch((error: unknown) => this.fail(error instanceof Error ? error : new Error(String(error))));
+    this.operatorSession = session;
+    void session.connect().catch((error: unknown) => {
+      if (this.operatorSession !== session) return;
+      this.fail(error instanceof Error ? error : new Error(String(error)));
+    });
   }
 
   private async handleAppCommand(msg: DirectAppCommand) {

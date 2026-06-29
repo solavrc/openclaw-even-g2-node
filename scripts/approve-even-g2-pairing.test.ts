@@ -90,6 +90,21 @@ describe("approve Even G2 pairing helpers", () => {
     })).toBe(false);
     expect(isEvenG2Request({
       kind: "device",
+      requestId: "request-node-host",
+      clientId: "node-host",
+      source: "devices-list",
+    })).toBe(false);
+    expect(isEvenG2Request({
+      kind: "node",
+      requestId: "request-device-only",
+      clientId: "node-host",
+      deviceFamily: "glasses",
+      caps: ["device"],
+      commands: ["device.status"],
+      source: "nodes-pending",
+    })).toBe(false);
+    expect(isEvenG2Request({
+      kind: "device",
       requestId: "request-2",
       deviceFamily: "glasses",
       displayName: "Even G2",
@@ -99,6 +114,14 @@ describe("approve Even G2 pairing helpers", () => {
       kind: "node",
       requestId: "request-3",
       clientId: "openclaw-even-g2-node",
+      source: "nodes-pending",
+    })).toBe(true);
+    expect(isEvenG2Request({
+      kind: "node",
+      requestId: "request-4",
+      clientId: "node-host",
+      deviceFamily: "glasses",
+      commands: ["canvas.present"],
       source: "nodes-pending",
     })).toBe(true);
   });

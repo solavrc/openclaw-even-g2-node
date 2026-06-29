@@ -179,6 +179,7 @@ import type { CanvasTutorialStep, OpenClawAskCanvasOptions } from "./canvas-rend
 import { serializableDeviceStatus } from "./even-device-status";
 import {
   canvasImageFailedError,
+  canvasImageTooLargeError,
   canvasImageUrlUnsupportedError,
   deviceNodeCommandPayload,
   evenG2BridgeUnavailableError,
@@ -2294,6 +2295,9 @@ export function App() {
         return true;
       case "remote-image-unsupported":
         sendNodeCommandResult(id, false, {}, canvasImageUrlUnsupportedError());
+        return true;
+      case "image-too-large":
+        sendNodeCommandResult(id, false, {}, canvasImageTooLargeError(plan.maxBytes));
         return true;
       case "present-message":
         await presentMessageCanvas(id, plan.params, plan.kind, plan.text);

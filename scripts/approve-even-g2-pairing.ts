@@ -37,6 +37,13 @@ type PendingRequest = {
 
 const DEFAULT_WATCH_MS = 30_000;
 const DEFAULT_POLL_MS = 750;
+const EVEN_G2_NODE_CAPS = new Set(["canvas", "talk"]);
+const EVEN_G2_NODE_COMMANDS = new Set([
+  "canvas.hide",
+  "canvas.present",
+  "canvas.snapshot",
+  "talk.ptt.once",
+]);
 
 const HELP = `Approve the current Even G2 OpenClaw pairing flow.
 
@@ -297,11 +304,16 @@ export function isEvenG2Request(request: PendingRequest): boolean {
   const displayName = request.displayName?.toLowerCase() || "";
   const platform = request.platform?.toLowerCase() || "";
   const clientId = request.clientId?.toLowerCase() || "";
+  const deviceFamily = request.deviceFamily?.toLowerCase() || "";
+  const caps = new Set((request.caps || []).map((cap) => cap.toLowerCase()));
+  const commands = new Set((request.commands || []).map((command) => command.toLowerCase()));
+  const hasEvenG2NodeSurface = [...commands].some((command) => EVEN_G2_NODE_COMMANDS.has(command))
+    || [...caps].some((cap) => EVEN_G2_NODE_CAPS.has(cap));
   return platform === "even-g2"
     || clientId === "openclaw-even-g2-node"
-    || clientId === "node-host"
     || displayName === "even g2"
-    || displayName.includes("even g2");
+    || displayName.includes("even g2")
+    || (clientId === "node-host" && deviceFamily === "glasses" && hasEvenG2NodeSurface);
 }
 
 function formatRequest(request: PendingRequest): string {

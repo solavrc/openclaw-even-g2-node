@@ -8,6 +8,7 @@ export type CanvasMode = "text" | "image" | "message" | "notification";
 
 export type CanvasNodeCommandPlan =
   | { action: "present-image"; requiresBridge: true; imagePayload: CanvasImagePayload }
+  | { action: "image-too-large"; requiresBridge: false; maxBytes: number }
   | {
     action: "present-message";
     requiresBridge: true;
@@ -33,6 +34,8 @@ export type CanvasPresentationState = {
   view: "canvas";
   previewText: string;
 };
+
+export const CANVAS_IMAGE_MAX_INLINE_BYTES = 1_500_000;
 
 function stripHtml(value: string) {
   return value
@@ -67,6 +70,11 @@ export function textFromCanvasParams(params: Record<string, unknown>) {
 }
 
 export function canvasImageDataUrlFromParams(params: Record<string, unknown>): CanvasImagePayload | null {
+  const result = canvasImageDataUrlResultFromParams(params);
+  return result === "too-large" ? null : result;
+}
+
+function canvasImageDataUrlResultFromParams(params: Record<string, unknown>): CanvasImagePayload | "too-large" | null {
   const alt = typeof params.alt === "string" ? params.alt.trim() : "";
   const mimeType = typeof params.mimeType === "string"
     ? params.mimeType.trim()
@@ -86,9 +94,14 @@ export function canvasImageDataUrlFromParams(params: Record<string, unknown>): C
     if (typeof candidate !== "string") continue;
     const value = candidate.trim();
     if (!value) continue;
-    if (value.startsWith("data:image/")) return { dataUrl: value, alt };
+    if (value.startsWith("data:image/")) {
+      if (value.length > CANVAS_IMAGE_MAX_INLINE_BYTES) return "too-large";
+      return { dataUrl: value, alt };
+    }
     if (/^[A-Za-z0-9+/]+=*$/.test(value) && value.length > 64) {
-      return { dataUrl: `data:${mimeType || "image/png"};base64,${value}`, alt };
+      const dataUrl = `data:${mimeType || "image/png"};base64,${value}`;
+      if (dataUrl.length > CANVAS_IMAGE_MAX_INLINE_BYTES) return "too-large";
+      return { dataUrl, alt };
     }
   }
   return null;
@@ -128,7 +141,10 @@ export function canvasNodeCommandPlan(command: string, params: Record<string, un
   if (command === "canvas.hide") return { action: "hide", requiresBridge: false };
   if (command === "canvas.snapshot") return { action: "snapshot", requiresBridge: false };
   if (command !== "canvas.present") return null;
-  const imagePayload = canvasImageDataUrlFromParams(params);
+  const imagePayload = canvasImageDataUrlResultFromParams(params);
+  if (imagePayload === "too-large") {
+    return { action: "image-too-large", requiresBridge: false, maxBytes: CANVAS_IMAGE_MAX_INLINE_BYTES };
+  }
   if (imagePayload) return { action: "present-image", requiresBridge: true, imagePayload };
   if (hasRemoteCanvasImage(params)) return { action: "remote-image-unsupported", requiresBridge: true };
   const kind = canvasPresentationKindFromParams(params);
