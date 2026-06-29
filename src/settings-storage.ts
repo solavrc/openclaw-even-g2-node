@@ -49,7 +49,9 @@ export function parseStoredSettings(raw: string | null | undefined): Partial<Cli
       lastSeenNodeId: typeof parsed.lastSeenNodeId === "string" ? parsed.lastSeenNodeId : undefined,
       voiceMode,
       preferredReviewProvider: typeof parsed.preferredReviewProvider === "string" ? parsed.preferredReviewProvider : undefined,
-      voiceRecordingLimitSeconds: normalizeVoiceRecordingLimitSeconds(parsed.voiceRecordingLimitSeconds),
+      voiceRecordingLimitSeconds: parsed.voiceRecordingLimitSeconds === undefined
+        ? undefined
+        : normalizeVoiceRecordingLimitSeconds(parsed.voiceRecordingLimitSeconds),
       canvasTutorialCompleted: parsed.canvasTutorialCompleted === true ? true : undefined,
       settingsVersion: parsed.settingsVersion === SETTINGS_VERSION ? SETTINGS_VERSION : undefined,
     };

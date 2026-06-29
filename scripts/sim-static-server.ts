@@ -1,8 +1,9 @@
 import { createServer } from "node:http";
 import { readFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
-import { extname, join, normalize, resolve } from "node:path";
+import { extname, isAbsolute, join, normalize, relative, resolve, sep } from "node:path";
 import type { ServerResponse } from "node:http";
+import { pathToFileURL } from "node:url";
 import { errorStack } from "./strict-helpers.ts";
 
 const APP_DIST = resolve(process.env.EVENG2_APP_DIST || "dist");
@@ -43,10 +44,18 @@ function rewriteIndexHtml(html: string): string {
   return html.replace(/(href|src)="\/assets\//g, `$1="${BASE_PATH}assets/`);
 }
 
+export function staticFilePathForRequestPath(pathname: string, appDist = APP_DIST): string | null {
+  const relativePath = pathname === "/" ? "index.html" : pathname.replace(/^\/+/, "");
+  const filePath = normalize(join(appDist, relativePath));
+  const pathFromDist = relative(appDist, filePath);
+  if (pathFromDist === ".." || pathFromDist.startsWith(`..${sep}`) || isAbsolute(pathFromDist)) return null;
+  return filePath;
+}
+
 async function serveFile(res: ServerResponse, pathname: string): Promise<void> {
   const relativePath = pathname === "/" ? "index.html" : pathname.replace(/^\/+/, "");
-  const filePath = normalize(join(APP_DIST, relativePath));
-  if (!filePath.startsWith(APP_DIST)) {
+  const filePath = staticFilePathForRequestPath(pathname);
+  if (!filePath) {
     res.writeHead(403, { "content-type": "text/plain; charset=utf-8" });
     res.end("forbidden");
     return;
@@ -94,7 +103,9 @@ async function main() {
   }));
 }
 
-main().catch((err) => {
-  console.error(errorStack(err));
-  process.exit(1);
-});
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  main().catch((err) => {
+    console.error(errorStack(err));
+    process.exit(1);
+  });
+}

@@ -209,6 +209,7 @@ import {
   saveBridgeClientSettings,
   saveBrowserClientSettings,
 } from "./client-settings";
+import type { LoadedClientSettings } from "./client-settings";
 import {
   closeReasonFromEvent,
   canSendGatewayNodeCommandResult,
@@ -350,9 +351,10 @@ function loadSettings() {
   });
 }
 
-async function loadBridgeSettings(bridge: EvenAppBridge) {
+async function loadBridgeSettings(bridge: EvenAppBridge, browserFallbackSettings: LoadedClientSettings) {
   return loadBridgeClientSettings(bridge, {
     currentStartupSettings: settingsFromUrl(),
+    browserFallbackSettings,
   });
 }
 
@@ -859,7 +861,12 @@ export function App() {
     const ws = wsRef.current;
     if (!ws || !isGatewayTransportOpen(ws.readyState, WebSocket.OPEN) || !nextSessionKey) return;
     const requestedLimit = sessionTranscriptRequestLimit(options.limit, sessionTranscriptRawLimitRef.current);
-    if (!options.force && sessionTranscriptLoadingLimitRef.current !== null && sessionTranscriptLoadingLimitRef.current >= requestedLimit) return;
+    if (
+      !options.force
+      && sessionTranscriptRequestedSessionKeyRef.current === nextSessionKey
+      && sessionTranscriptLoadingLimitRef.current !== null
+      && sessionTranscriptLoadingLimitRef.current >= requestedLimit
+    ) return;
     sessionTranscriptLoadingLimitRef.current = requestedLimit;
     sessionTranscriptRequestedSessionKeyRef.current = nextSessionKey;
     if (options.expand) pendingHistoryExpandRef.current = { sessionKey: nextSessionKey, limit: requestedLimit };
@@ -1526,7 +1533,15 @@ export function App() {
     options: { isCancelled: () => boolean },
   ) {
     try {
-      const stored = await loadBridgeSettings(bridge);
+      const stored = await loadBridgeSettings(bridge, {
+        gatewayUrl: gatewayUrlRef.current,
+        selectedSessionKey: sessionKeyRef.current,
+        lastSeenNodeId: lastSeenNodeIdRef.current,
+        voiceMode: voiceModeRef.current,
+        preferredReviewProvider: preferredReviewProviderRef.current,
+        voiceRecordingLimitSeconds: voiceRecordingLimitSecondsRef.current,
+        canvasTutorialCompleted: canvasTutorialCompletedRef.current,
+      });
       if (options.isCancelled() || userEditedSettingsRef.current) return;
       if (applySimulatorFixture(bridge)) return;
       const plan = loadedBridgeSettingsPlan(stored);
@@ -1886,7 +1901,6 @@ export function App() {
     msg: GatewaySessionListResultMessage,
   ) {
     const update = gatewaySessionListUpdate(msg.sessions, sessionKeyRef.current);
-    if (!update.sessions.length) return;
     applySessionList(update.sessions);
     if (update.shouldSwitchSession) {
       applyActiveSessionSelection(update.activeSessionKey, { resetTranscript: update.shouldResetTranscript });

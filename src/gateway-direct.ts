@@ -103,8 +103,8 @@ export type DeviceIdentitySigner = {
 };
 
 export type DeviceAuthStorage = {
-  load(deviceId: string, role: GatewayRole): DeviceAuthEntry | null;
-  save(deviceId: string, role: GatewayRole, token: string, scopes: string[]): void;
+  load(deviceId: string, role: GatewayRole, gatewayUrl?: string): DeviceAuthEntry | null;
+  save(deviceId: string, role: GatewayRole, token: string, scopes: string[], gatewayUrl?: string): void;
 };
 
 export type RpcResult<T = unknown> = {
@@ -300,9 +300,9 @@ export class BrowserDeviceIdentityStore {
 export class BrowserDeviceAuthStore {
   constructor(private readonly storage: Storage = localStorage) {}
 
-  load(deviceId: string, role: GatewayRole): DeviceAuthEntry | null {
+  load(deviceId: string, role: GatewayRole, gatewayUrl = ""): DeviceAuthEntry | null {
     const root = this.loadRoot();
-    const entry = root[this.key(deviceId, role)];
+    const entry = root[this.key(deviceId, role, gatewayUrl)];
     if (!entry?.token) return null;
     return {
       token: entry.token,
@@ -312,9 +312,9 @@ export class BrowserDeviceAuthStore {
     };
   }
 
-  save(deviceId: string, role: GatewayRole, token: string, scopes: string[]) {
+  save(deviceId: string, role: GatewayRole, token: string, scopes: string[], gatewayUrl = "") {
     const root = this.loadRoot();
-    root[this.key(deviceId, role)] = {
+    root[this.key(deviceId, role, gatewayUrl)] = {
       token: token.trim(),
       scopes: [...new Set(scopes.map((scope) => scope.trim()).filter(Boolean))].sort(),
       updatedAtMs: Date.now(),
@@ -322,8 +322,8 @@ export class BrowserDeviceAuthStore {
     this.storage.setItem(AUTH_STORAGE_KEY, JSON.stringify(root));
   }
 
-  private key(deviceId: string, role: GatewayRole) {
-    return `${deviceId.trim().toLowerCase()}.${role}`;
+  private key(deviceId: string, role: GatewayRole, gatewayUrl: string) {
+    return `${deviceId.trim().toLowerCase()}.${role}.${normalizedGatewayAuthUrl(gatewayUrl)}`;
   }
 
   private loadRoot(): Record<string, { token?: string; scopes?: string[]; updatedAtMs?: number }> {
@@ -335,6 +335,21 @@ export class BrowserDeviceAuthStore {
     } catch {
       return {};
     }
+  }
+}
+
+export function normalizedGatewayAuthUrl(gatewayUrl: string) {
+  const trimmed = gatewayUrl.trim();
+  if (!trimmed) return "";
+  try {
+    const url = new URL(trimmed);
+    url.username = "";
+    url.password = "";
+    url.search = "";
+    url.hash = "";
+    return url.toString().toLowerCase();
+  } catch {
+    return trimmed.toLowerCase();
   }
 }
 
@@ -524,7 +539,7 @@ export class GatewayWsSession {
         identity,
         nonce,
         options: this.options,
-        storedAuth: this.authStore.load(identity.deviceId, this.options.role),
+        storedAuth: this.authStore.load(identity.deviceId, this.options.role, this.options.url),
       });
       this.ws?.send(gatewayRpcRequestText("__connect__", "connect", params));
       return;
@@ -539,7 +554,7 @@ export class GatewayWsSession {
     const save = (role: unknown, token: unknown, scopes: unknown) => {
       if ((role === "node" || role === "operator") && typeof token === "string" && token.trim()) {
         const normalizedScopes = Array.isArray(scopes) ? scopes.filter((scope): scope is string => typeof scope === "string") : [];
-        this.authStore.save(deviceId, role, token, normalizedScopes);
+        this.authStore.save(deviceId, role, token, normalizedScopes, this.options.url);
       }
     };
     save(auth.role || this.options.role, auth.deviceToken, auth.scopes);
@@ -717,7 +732,7 @@ export function approvalRequestMessageFromGatewayEvent(payload: unknown): Extrac
   const root = asObject(payload);
   if (!root) return null;
   const request = asObject(root.request) || root;
-  const id = asString(root.id) || asString(request.id);
+  const id = asString(root.id) || asString(root.requestId) || asString(request.id) || asString(request.requestId);
   if (!id) return null;
   return {
     type: "eveng2.approval.request",
@@ -733,7 +748,8 @@ export function approvalRequestMessageFromGatewayEvent(payload: unknown): Extrac
 export function approvalResolvedMessageFromGatewayEvent(payload: unknown): Extract<DirectTransportMessage, { type: "eveng2.approval.resolved" }> | null {
   const root = asObject(payload);
   if (!root) return null;
-  const id = asString(root.id);
+  const request = asObject(root.request) || root;
+  const id = asString(root.id) || asString(root.requestId) || asString(request.id) || asString(request.requestId);
   if (!id) return null;
   return {
     type: "eveng2.approval.resolved",
@@ -1337,11 +1353,12 @@ export class GatewayDirectVoiceTransport extends EventTarget {
     const payloadObject = asObject(root.payload);
     const dataObject = asObject(root.data);
     const eventObject = asObject(root.event);
-    const candidates = [root, payloadObject, dataObject, eventObject].filter((item): item is Record<string, unknown> => Boolean(item));
-    const eventType = candidates
+    const candidates = [payloadObject, dataObject, eventObject, root].filter((item): item is Record<string, unknown> => Boolean(item));
+    const eventTypeRaw = candidates
       .map((item) => asString(item.type) || asString(item.event) || asString(item.kind) || asString(item.name))
-      .find(Boolean)
-      ?.toLowerCase() || "";
+      .find((value) => Boolean(value && !["talk.event", "event"].includes(value.toLowerCase())))
+      || candidates.map((item) => asString(item.type) || asString(item.event) || asString(item.kind) || asString(item.name)).find(Boolean);
+    const eventType = eventTypeRaw?.toLowerCase() || "";
     const eventSessionId = candidates
       .map((item) => asString(item.transcriptionSessionId)
         || asString(item.transcription_session_id)

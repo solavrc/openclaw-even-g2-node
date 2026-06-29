@@ -317,6 +317,17 @@ describe("Gateway direct setup", () => {
     expect(storage.getItem("openclaw-even-g2-node-device-auth-v1")).toBeNull();
   });
 
+  it("scopes stored device tokens by Gateway URL", () => {
+    const authStore = new BrowserDeviceAuthStore(new MemoryStorage());
+    authStore.save("device-1", "node", "gateway-a-token", [], "wss://gateway-a.example.test/ws?setup=secret#pairing");
+
+    expect(authStore.load("device-1", "node", "wss://gateway-a.example.test/ws")).toMatchObject({
+      token: "gateway-a-token",
+      role: "node",
+    });
+    expect(authStore.load("device-1", "node", "wss://gateway-b.example.test/ws")).toBeNull();
+  });
+
   it("requests current scopes when reconnecting with a stored device token", async () => {
     vi.spyOn(Date, "now").mockReturnValue(1700000000000);
     const params = await buildConnectParams({
@@ -452,12 +463,12 @@ describe("Gateway session events", () => {
       },
     }, identity.deviceId);
 
-    expect(authStore.load(identity.deviceId, "node")).toMatchObject({
+    expect(authStore.load(identity.deviceId, "node", "wss://gateway.example.test")).toMatchObject({
       token: "node-token",
       role: "node",
       scopes: [],
     });
-    expect(authStore.load(identity.deviceId, "operator")).toMatchObject({
+    expect(authStore.load(identity.deviceId, "operator", "wss://gateway.example.test")).toMatchObject({
       token: "operator-token",
       role: "operator",
       scopes: ["operator.approvals", "operator.read", "operator.talk.secrets", "operator.write"],
@@ -518,6 +529,21 @@ describe("Gateway direct approval events", () => {
     });
   });
 
+  it("accepts requestId-only Gateway approval requests", () => {
+    expect(approvalRequestMessageFromGatewayEvent({
+      requestId: "request-1",
+      request: {
+        commandText: "npm test",
+        requestId: "nested-request-1",
+      },
+    })).toMatchObject({
+      type: "eveng2.approval.request",
+      id: "request-1",
+      requestId: "request-1",
+      command: "npm test",
+    });
+  });
+
   it("normalizes resolved Gateway approval events", () => {
     expect(approvalResolvedMessageFromGatewayEvent({
       id: "approval-1",
@@ -527,6 +553,18 @@ describe("Gateway direct approval events", () => {
       id: "approval-1",
       requestId: "approval-1",
       decision: "deny",
+    });
+  });
+
+  it("accepts requestId-only Gateway approval resolved events", () => {
+    expect(approvalResolvedMessageFromGatewayEvent({
+      requestId: "request-1",
+      decision: "accept",
+    })).toEqual({
+      type: "eveng2.approval.resolved",
+      id: "request-1",
+      requestId: "request-1",
+      decision: "accept",
     });
   });
 });
@@ -939,13 +977,13 @@ describe("Gateway direct voice", () => {
 
     const openPromise = voice.open();
     await vi.waitFor(() => expect(calls.some((call) => call.method === "talk.session.create")).toBe(true));
-    voice.handleTalkEvent({ type: "ready", transcriptionSessionId: "talk-1" });
+    voice.handleTalkEvent({ type: "talk.event", payload: { type: "ready", transcriptionSessionId: "talk-1" } });
     await openPromise;
     voice.send(pcmToneBytes().buffer);
     await vi.waitFor(() => expect(calls.some((call) => call.method === "talk.session.appendAudio")).toBe(true));
-    voice.handleTalkEvent({ type: "transcript.delta", sessionId: "talk-1", text: "OpenClaw" });
+    voice.handleTalkEvent({ type: "talk.event", payload: { type: "transcript.delta", sessionId: "talk-1", text: "OpenClaw" } });
     voice.send(JSON.stringify({ type: "utterance.finalize" }));
-    voice.handleTalkEvent({ type: "transcript.done", sessionId: "talk-1", text: "OpenClawについて説明して。" });
+    voice.handleTalkEvent({ type: "talk.event", payload: { type: "transcript.done", sessionId: "talk-1", text: "OpenClawについて説明して。" } });
     await vi.waitFor(() => expect(messages.some((message) => message.type === "voice.draft.ready")).toBe(true));
 
     expect(calls[0]).toMatchObject({

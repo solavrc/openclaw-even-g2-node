@@ -60,6 +60,22 @@ export function loadedBridgeSettingsPlan(settings: LoadedClientSettings): Loaded
 type BrowserSettingsStorage = Pick<Storage, "getItem" | "removeItem" | "setItem">;
 type StartupHandoffStorage = Pick<Storage, "getItem" | "removeItem" | "setItem">;
 
+function mergeDefinedSettings(
+  fallback: LoadedClientSettings,
+  stored: Partial<ClientSettings>,
+): Partial<ClientSettings> {
+  return {
+    gatewayUrl: stored.gatewayUrl ?? fallback.gatewayUrl,
+    selectedSessionKey: stored.selectedSessionKey ?? fallback.selectedSessionKey,
+    lastSeenNodeId: stored.lastSeenNodeId ?? fallback.lastSeenNodeId,
+    voiceMode: stored.voiceMode ?? fallback.voiceMode,
+    preferredReviewProvider: stored.preferredReviewProvider ?? fallback.preferredReviewProvider,
+    voiceRecordingLimitSeconds: stored.voiceRecordingLimitSeconds ?? fallback.voiceRecordingLimitSeconds,
+    canvasTutorialCompleted: stored.canvasTutorialCompleted ?? fallback.canvasTutorialCompleted,
+    settingsVersion: stored.settingsVersion,
+  };
+}
+
 export function resolvedClientSettings(
   startupSettings: StartupUrlSettings,
   stored: Partial<ClientSettings>,
@@ -101,6 +117,7 @@ export async function loadBridgeClientSettings(
   input: {
     currentStartupSettings: StartupUrlSettings;
     startupHandoffStorage?: StartupHandoffStorage;
+    browserFallbackSettings?: LoadedClientSettings;
   },
 ) {
   const fromUrl = input.currentStartupSettings.gatewayUrl || input.currentStartupSettings.resetPairing
@@ -108,8 +125,16 @@ export async function loadBridgeClientSettings(
     : consumeStartupUrlSettingsForBridge(input.startupHandoffStorage) || input.currentStartupSettings;
   if (fromUrl.resetPairing) await clearBridgeClientSettings(bridge);
   await hydrateDeviceCredentialsFromBridge(bridge);
-  const stored = parseStoredSettings(await getBridgeStorageValue(bridge, CLIENT_SETTINGS_STORAGE_KEY));
-  return resolvedClientSettings(fromUrl, stored, "");
+  const raw = await getBridgeStorageValue(bridge, CLIENT_SETTINGS_STORAGE_KEY);
+  const stored = parseStoredSettings(raw);
+  const mergedStored = input.browserFallbackSettings
+    ? mergeDefinedSettings(input.browserFallbackSettings, stored)
+    : stored;
+  const resolved = resolvedClientSettings(fromUrl, mergedStored, "");
+  if (!raw && input.browserFallbackSettings) {
+    await setBridgeStorageValue(bridge, CLIENT_SETTINGS_STORAGE_KEY, settingsPayloadForStorage(resolved));
+  }
+  return resolved;
 }
 
 export function saveBrowserClientSettings(

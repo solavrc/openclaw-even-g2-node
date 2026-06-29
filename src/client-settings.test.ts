@@ -159,6 +159,69 @@ describe("client settings", () => {
     expect(handoffStorage.getItem(STARTUP_URL_SETTINGS_KEY)).toBeNull();
   });
 
+  it("keeps browser settings when bridge storage has not mirrored them yet", async () => {
+    const bridge = new FakeBridgeStorage();
+    const settings = await loadBridgeClientSettings(bridge, {
+      currentStartupSettings: { gatewayUrl: "", resetPairing: false },
+      browserFallbackSettings: {
+        gatewayUrl: "ws://browser",
+        selectedSessionKey: "agent:main:direct:first",
+        lastSeenNodeId: "node-1",
+        voiceMode: "off",
+        preferredReviewProvider: "openai",
+        voiceRecordingLimitSeconds: 120,
+        canvasTutorialCompleted: true,
+      },
+    });
+
+    expect(settings).toMatchObject({
+      gatewayUrl: "ws://browser",
+      selectedSessionKey: "agent:main:direct:first",
+      lastSeenNodeId: "node-1",
+      voiceMode: "off",
+      preferredReviewProvider: "openai",
+      voiceRecordingLimitSeconds: 120,
+      canvasTutorialCompleted: true,
+    });
+    expect(JSON.parse(bridge.storage.getItem(CLIENT_SETTINGS_STORAGE_KEY) || "{}")).toMatchObject({
+      gatewayUrl: "ws://browser",
+      selectedSessionKey: "agent:main:direct:first",
+      lastSeenNodeId: "node-1",
+      voiceMode: "off",
+      preferredReviewProvider: "openai",
+      voiceRecordingLimitSeconds: 120,
+      canvasTutorialCompleted: true,
+    });
+  });
+
+  it("treats missing bridge fields as absent over browser settings", async () => {
+    const bridge = new FakeBridgeStorage();
+    bridge.storage.setItem(CLIENT_SETTINGS_STORAGE_KEY, JSON.stringify({
+      gatewayUrl: "ws://bridge",
+    }));
+
+    await expect(loadBridgeClientSettings(bridge, {
+      currentStartupSettings: { gatewayUrl: "", resetPairing: false },
+      browserFallbackSettings: {
+        gatewayUrl: "ws://browser",
+        selectedSessionKey: "agent:main:direct:first",
+        lastSeenNodeId: "node-1",
+        voiceMode: "direct",
+        preferredReviewProvider: "openai",
+        voiceRecordingLimitSeconds: 120,
+        canvasTutorialCompleted: true,
+      },
+    })).resolves.toMatchObject({
+      gatewayUrl: "ws://bridge",
+      selectedSessionKey: "agent:main:direct:first",
+      lastSeenNodeId: "node-1",
+      voiceMode: "direct",
+      preferredReviewProvider: "openai",
+      voiceRecordingLimitSeconds: 120,
+      canvasTutorialCompleted: true,
+    });
+  });
+
   it("saves and clears browser settings", () => {
     const browserStorage = new MemoryStorage();
 
