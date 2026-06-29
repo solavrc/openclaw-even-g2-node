@@ -18,8 +18,10 @@ type ParsedArgs = {
   openclawProfile: string;
   openclawTimeoutMs: number;
   outDir: string | null;
+  sendNowSmoke: boolean;
   simulatorPort: number | null;
   token: string;
+  voiceReviewSmoke: boolean;
 };
 
 type ConnectedNode = {
@@ -53,6 +55,8 @@ Options:
   --approval-watch-ms <n>   Pairing approval watch window. Default: ${DEFAULT_APPROVAL_WATCH_MS}
   --openclaw-timeout-ms <n> Timeout for OpenClaw node invocations. Default: ${DEFAULT_OPENCLAW_TIMEOUT_MS}
   --canvas-text <text>      Text for the live canvas check.
+  --voice-review-smoke      After pairing, run the real Review microphone/Talk smoke.
+  --send-now-smoke          After pairing, run the real Send now WAV attachment smoke.
   --out-dir <path>          Output directory for pnpm e2e:agent:live. Default: that script's default.
   -h, --help                Show this help.
 `;
@@ -89,8 +93,10 @@ export function parseArgs(argv: string[], now = new Date()): ParsedArgs {
     openclawProfile: `eveng2-e2e-${timestampSlug(now)}`,
     openclawTimeoutMs: DEFAULT_OPENCLAW_TIMEOUT_MS,
     outDir: null,
+    sendNowSmoke: false,
     simulatorPort: null,
     token: DEFAULT_TOKEN,
+    voiceReviewSmoke: false,
   };
 
   for (let index = 0; index < argv.length; index += 1) {
@@ -127,6 +133,10 @@ export function parseArgs(argv: string[], now = new Date()): ParsedArgs {
     } else if (arg === "--canvas-text") {
       args.canvasText = readFlagValue(argv, index, arg);
       index += 1;
+    } else if (arg === "--voice-review-smoke") {
+      args.voiceReviewSmoke = true;
+    } else if (arg === "--send-now-smoke") {
+      args.sendNowSmoke = true;
     } else if (arg === "--out-dir") {
       args.outDir = path.resolve(readFlagValue(argv, index, arg));
       index += 1;
@@ -139,6 +149,7 @@ export function parseArgs(argv: string[], now = new Date()): ParsedArgs {
   }
 
   if (!args.openclawProfile.trim()) throw new Error("--profile must not be empty.");
+  if (args.voiceReviewSmoke && args.sendNowSmoke) throw new Error("--voice-review-smoke and --send-now-smoke cannot be used in the same run because they require different startup voice modes.");
   return args;
 }
 
@@ -472,7 +483,7 @@ async function runIsolatedLiveE2e(argv = process.argv.slice(2)) {
     ], { printOutput: false, timeoutMs: 15_000 }).trim();
     if (!setupCode) throw new Error("OpenClaw did not return a setup code.");
 
-    const appUrl = `http://127.0.0.1:${appPort}/?resetPairing=1&e2eLog=1&setupCode=${encodeURIComponent(setupCode)}`;
+    const appUrl = `http://127.0.0.1:${appPort}/?resetPairing=1&e2eLog=1${args.sendNowSmoke ? "&e2eVoiceMode=direct" : ""}&setupCode=${encodeURIComponent(setupCode)}`;
     simulator = spawnProcess(process.execPath, [SIMULATOR_BIN, appUrl, "--automation-port", String(simulatorPort)]);
     await waitForSimulator(simulatorUrl);
 
@@ -502,6 +513,23 @@ async function runIsolatedLiveE2e(argv = process.argv.slice(2)) {
       outDir,
     ], { timeoutMs: 45_000 });
 
+    if (args.voiceReviewSmoke || args.sendNowSmoke) {
+      runRequired("pnpm", [
+        args.voiceReviewSmoke ? "smoke:voice-review" : "smoke:send-now",
+      ], {
+        env: {
+          EVENG2_E2E_OPENCLAW_CONTAINER: args.openclawContainer,
+          EVENG2_E2E_OPENCLAW_PROFILE: args.openclawProfile,
+          EVENG2_E2E_OPENCLAW_TOKEN: args.token,
+          EVENG2_E2E_OPENCLAW_URL: gatewayUrl,
+          EVENG2_SIMULATOR_URL: simulatorUrl,
+          EVENG2_VOICE_NODE: connectedNodeId,
+          EVENG2_SEND_NOW_NODE: connectedNodeId,
+        },
+        timeoutMs: 90_000,
+      });
+    }
+
     writeIsolatedRunSummary(outDir, {
       ok: true,
       generatedAt: new Date().toISOString(),
@@ -517,6 +545,8 @@ async function runIsolatedLiveE2e(argv = process.argv.slice(2)) {
         simulator: simulatorPort,
       },
       connectedNodeId,
+      sendNowSmoke: args.sendNowSmoke,
+      voiceReviewSmoke: args.voiceReviewSmoke,
       outDir,
     });
 

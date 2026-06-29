@@ -17,7 +17,9 @@ describe("isolated agentic E2E helpers", () => {
       gatewayPort: null,
       openclawContainer: "",
       openclawProfile: "eveng2-e2e-2026-06-30T00-00-00-000Z",
+      sendNowSmoke: false,
       token: "dummy-e2e-token",
+      voiceReviewSmoke: false,
     });
   });
 
@@ -42,6 +44,7 @@ describe("isolated agentic E2E helpers", () => {
       "7000",
       "--canvas-text",
       "hello",
+      "--send-now-smoke",
       "--out-dir",
       "/tmp/even-g2-e2e",
     ]);
@@ -55,9 +58,14 @@ describe("isolated agentic E2E helpers", () => {
       openclawProfile: "eveng2-e2e-manual",
       openclawTimeoutMs: 7000,
       outDir: "/tmp/even-g2-e2e",
+      sendNowSmoke: true,
       simulatorPort: 9898,
       token: "throwaway",
     });
+  });
+
+  it("rejects mutually exclusive live voice smoke modes", () => {
+    expect(() => parseArgs(["--voice-review-smoke", "--send-now-smoke"])).toThrow(/cannot be used in the same run/);
   });
 
   it("selects the newest connected Even G2 canvas node", () => {

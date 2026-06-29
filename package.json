@@ -47,6 +47,7 @@
     "e2e:agent:isolated": "tsx scripts/e2e-agent-live-isolated.ts",
     "e2e:agent:review:validate": "tsx scripts/validate-llm-review.ts",
     "smoke:voice-review": "tsx scripts/evenhub-simulator-voice-review-smoke.ts",
+    "smoke:send-now": "tsx scripts/evenhub-simulator-send-now-smoke.ts",
     "docs:links": "tsx scripts/check-markdown-links.ts",
     "diag:touch-watch": "tsx scripts/diag-physical-touch-watch.ts",
     "dev:reset-pairing": "tsx scripts/reset-openclaw-pairing.ts",

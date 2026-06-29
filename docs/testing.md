@@ -126,6 +126,7 @@ Force a mode when needed:
 EVENG2_SIM_FLOW=setup pnpm sim:e2e
 EVENG2_SIM_FLOW=session pnpm sim:e2e
 EVENG2_SIM_FLOW=voiceReview pnpm sim:e2e
+EVENG2_SIM_FLOW=sendNow pnpm sim:e2e
 EVENG2_SIM_FLOW=canvas pnpm sim:e2e
 EVENG2_SIM_FLOW=approval pnpm sim:e2e
 EVENG2_SIM_FLOW=recovery pnpm sim:e2e
@@ -207,6 +208,21 @@ Useful tuning variables:
 - `EVENG2_VOICE_RECORD_MS` (default `10000`)
 - `EVENG2_VOICE_FINAL_LIT_PIXELS` (default `4500`)
 
+To test the real `Send now` path against a running simulator, paired Even G2
+node, OpenClaw Gateway, microphone, and a selected session that can accept audio
+attachments, start the app with direct voice mode and run:
+
+```bash
+pnpm simulator 'http://127.0.0.1:5174/?resetPairing=1&e2eLog=1&e2eVoiceMode=direct' --automation-port 9898
+pnpm smoke:send-now
+```
+
+The smoke starts recording from the glasses, stops after the configured record
+window, waits for the app's `session-voice-sent` evidence marker, and fails if
+the marker is not direct-mode evidence. This proves the app/Gateway path reached
+the `chat.send` WAV attachment acknowledgement; the selected Agent's later
+media understanding is still OpenClaw-owned behavior.
+
 To run the setup smoke and every dev-only fixture without manually switching
 simulator URLs:
 
@@ -216,7 +232,7 @@ pnpm sim:fixtures
 
 `sim:fixtures` starts and stops the required local app servers and Even Hub
 simulator processes. It builds the app first, then covers setup, session
-navigation, review-before-send, canvas, approval, and recovery fixture HUDs. For
+navigation, review-before-send, Send now, canvas, approval, and recovery fixture HUDs. For
 interactive fixture states it also drives representative glasses input events:
 session `up`/`down`, Review `tap send`, canvas `tap hide`, approval rerender and
 `tap allow`, tutorial skip, and Send now cancellation. It writes
@@ -248,7 +264,8 @@ pnpm e2e:agent
 
 - a snapshot of `docs/user-stories.md`;
 - simulator glasses and phone WebView screenshots;
-- simulator console logs and structured glass state markers when available;
+- simulator console logs and structured glass/session/voice/approval state
+  markers when available;
 - OpenClaw `nodes status` and `canvas.snapshot` command evidence when the
   local `openclaw` CLI can reach the active Gateway;
 - `review-prompt.md`, which tells the Coding Agent how to judge the run;
@@ -297,6 +314,12 @@ pnpm e2e:agent:isolated -- \
   --simulator-port 9898 \
   --out-dir /tmp/openclaw-even-g2-e2e-live
 ```
+
+Add `--voice-review-smoke` to run the microphone/Talk Review smoke inside the
+isolated profile after pairing. Add `--send-now-smoke` to run the direct WAV
+attachment smoke instead; the wrapper starts the app with `e2eVoiceMode=direct`
+for that mode. These smokes remain local on-demand checks because they depend on
+microphone input, Gateway voice/provider setup, and the GUI simulator.
 
 The setup code and OpenClaw tokens are not written to the evidence bundle or
 the wrapper's final summary. Command output is redacted before printing. When a
@@ -408,8 +431,8 @@ pnpm simulator 'http://127.0.0.1:5174/?resetPairing=1&simFixture=session&simSess
 EVENG2_SIM_FLOW=sessionSelector pnpm sim:e2e
 ```
 
-Replace `session` with `voiceReview`, `canvas`, `canvasTutorial`, `approval`,
-`recovery`, `storeChat`, or `storeVoice` to run a visual smoke against those
+Replace `session` with `voiceReview`, `sendNow`, `canvas`, `canvasTutorial`,
+`approval`, `recovery`, `storeChat`, or `storeVoice` to run a visual smoke against those
 fixture states. The
 non-session fixture flows capture the HUD and phone WebView and verify that the
 rendered output is visible; the `session` flow verifies selected-session HUD
@@ -420,6 +443,7 @@ sample states so HUD behavior can be tested without private OpenClaw state:
 
 - `simFixture=session`: selected-session view;
 - `simFixture=voiceReview`: review-before-send transcript screen;
+- `simFixture=sendNow`: direct Send now recording screen;
 - `simFixture=canvas`: `canvas.present` pushed text screen;
 - `simFixture=canvasTutorial`: first-run canvas tutorial sequence with image
   frames followed by the OpenClaw request prompt;
@@ -467,6 +491,7 @@ http://127.0.0.1:5174/?resetPairing=1&disableEvenBridge=1&setupCode=wss%3A%2F%2F
 http://127.0.0.1:5174/?resetPairing=1&disableEvenBridge=1&setupCode=wss%3A%2F%2Fgateway.example%2Fws&openPanel=diagnostics
 http://127.0.0.1:5174/?resetPairing=1&simFixture=session
 http://127.0.0.1:5174/?resetPairing=1&simFixture=voiceReview&openPanel=voice
+http://127.0.0.1:5174/?resetPairing=1&simFixture=sendNow&openPanel=voice
 http://127.0.0.1:5174/?resetPairing=1&simFixture=canvasTutorial
 http://127.0.0.1:5174/?resetPairing=1&simFixture=storeChat
 http://127.0.0.1:5174/?resetPairing=1&simFixture=storeVoice

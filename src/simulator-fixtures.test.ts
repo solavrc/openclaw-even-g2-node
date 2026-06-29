@@ -16,6 +16,7 @@ import {
   simulatorFixtureTranscript,
   simulatorFixtureViewPlan,
   simulatorNodeSnapshot,
+  simulatorSendNowPendingSessionVoice,
   simulatorStoreVoicePendingSessionVoice,
   simulatorFixtureModeFromSearch,
 } from "./simulator-fixtures";
@@ -33,6 +34,7 @@ describe("simulator fixtures", () => {
     expect(isSimulatorFixtureMode("voiceReview")).toBe(true);
     expect(isSimulatorFixtureMode("emojiProbe")).toBe(true);
     expect(isSimulatorFixtureMode("storeVoice")).toBe(true);
+    expect(isSimulatorFixtureMode("sendNow")).toBe(true);
     expect(isSimulatorFixtureMode("unknown")).toBe(false);
   });
 
@@ -58,6 +60,11 @@ describe("simulator fixtures", () => {
       targetSessionKey: SIMULATOR_FIXTURE_SESSION_KEY,
       idempotencyKey: "store-voice",
     });
+    expect(simulatorSendNowPendingSessionVoice()).toEqual({
+      mode: "direct",
+      targetSessionKey: SIMULATOR_FIXTURE_SESSION_KEY,
+      idempotencyKey: "send-now",
+    });
     expect(STORE_VOICE_LISTENING_TEXT).toContain("Summarize this thread");
     expect(VOICE_REVIEW_FIXTURE_DRAFT.targetSessionKey).toBe(SIMULATOR_FIXTURE_SESSION_KEY);
     expect(CANVAS_FIXTURE_TEXT).toContain("Deploy finished");
@@ -72,6 +79,11 @@ describe("simulator fixtures", () => {
     expect(simulatorFixtureViewPlan("storeVoice")).toMatchObject({
       action: "store-voice",
       voiceText: STORE_VOICE_LISTENING_TEXT,
+    });
+    expect(simulatorFixtureViewPlan("sendNow")).toMatchObject({
+      action: "store-voice",
+      pendingSessionVoice: simulatorSendNowPendingSessionVoice(),
+      voiceText: "",
     });
     expect(simulatorFixtureViewPlan("voiceReview")).toMatchObject({
       action: "voice-review",

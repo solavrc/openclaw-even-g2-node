@@ -41,8 +41,31 @@ function parseJsonFromOpenClaw<T>(raw: string): T {
   return JSON.parse(raw.slice(start)) as T;
 }
 
+function openClawGlobalArgs() {
+  return [
+    ...(process.env.EVENG2_VOICE_OPENCLAW_CONTAINER || process.env.EVENG2_E2E_OPENCLAW_CONTAINER
+      ? ["--container", process.env.EVENG2_VOICE_OPENCLAW_CONTAINER || process.env.EVENG2_E2E_OPENCLAW_CONTAINER || ""]
+      : []),
+    ...(process.env.EVENG2_VOICE_OPENCLAW_PROFILE || process.env.EVENG2_E2E_OPENCLAW_PROFILE
+      ? ["--profile", process.env.EVENG2_VOICE_OPENCLAW_PROFILE || process.env.EVENG2_E2E_OPENCLAW_PROFILE || ""]
+      : []),
+  ];
+}
+
+function openClawGatewayArgs() {
+  return [
+    ...(process.env.EVENG2_VOICE_OPENCLAW_URL || process.env.EVENG2_E2E_OPENCLAW_URL
+      ? ["--url", process.env.EVENG2_VOICE_OPENCLAW_URL || process.env.EVENG2_E2E_OPENCLAW_URL || ""]
+      : []),
+    ...(process.env.EVENG2_VOICE_OPENCLAW_TOKEN || process.env.EVENG2_E2E_OPENCLAW_TOKEN
+      ? ["--token", process.env.EVENG2_VOICE_OPENCLAW_TOKEN || process.env.EVENG2_E2E_OPENCLAW_TOKEN || ""]
+      : []),
+  ];
+}
+
 function deviceStatus(): NodeInvokeResult {
   const raw = execFileSync("openclaw", [
+    ...openClawGlobalArgs(),
     "nodes",
     "invoke",
     "--node",
@@ -50,6 +73,7 @@ function deviceStatus(): NodeInvokeResult {
     "--command",
     "device.status",
     "--json",
+    ...openClawGatewayArgs(),
   ], {
     encoding: "utf8",
     stdio: ["ignore", "pipe", "pipe"],

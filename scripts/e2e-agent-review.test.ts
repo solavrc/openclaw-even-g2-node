@@ -2,8 +2,10 @@ import { describe, expect, it } from "vitest";
 import {
   buildReviewPrompt,
   parseArgs,
+  parseE2eApprovalMarkers,
   parseE2eGlassMarkers,
   parseE2eSessionMarkers,
+  parseE2eVoiceMarkers,
   redactCommandArgs,
   redactText,
 } from "./e2e-agent-review.ts";
@@ -108,6 +110,20 @@ describe("e2e agent review helpers", () => {
     expect(states).toEqual([
       { action: "switch-session", toSessionKey: "agent:main:direct:notes" },
       { action: "gateway-send", token: "<redacted>" },
+    ]);
+  });
+
+  it("extracts structured voice and approval markers from simulator console text", () => {
+    const consoleText = [
+      "[openclaw-even-g2-node:e2e:voice] {\"action\":\"session-voice-sent\",\"token\":\"secret\"}",
+      "[openclaw-even-g2-node:e2e:approval] {\"action\":\"eveng2.approval.resolve.ack\",\"status\":\"accepted\"}",
+    ].join("\n");
+
+    expect(parseE2eVoiceMarkers(consoleText)).toEqual([
+      { action: "session-voice-sent", token: "<redacted>" },
+    ]);
+    expect(parseE2eApprovalMarkers(consoleText)).toEqual([
+      { action: "eveng2.approval.resolve.ack", status: "accepted" },
     ]);
   });
 

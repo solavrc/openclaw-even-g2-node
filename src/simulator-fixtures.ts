@@ -14,7 +14,8 @@ export type SimulatorFixtureMode =
   | "approval"
   | "recovery"
   | "storeChat"
-  | "storeVoice";
+  | "storeVoice"
+  | "sendNow";
 
 export const SIMULATOR_FIXTURE_SESSIONS: OpenClawSession[] = [
   {
@@ -137,6 +138,14 @@ export function simulatorStoreVoicePendingSessionVoice(): PendingSessionVoice {
   };
 }
 
+export function simulatorSendNowPendingSessionVoice(): PendingSessionVoice {
+  return {
+    mode: "direct",
+    targetSessionKey: SIMULATOR_FIXTURE_SESSION_KEY,
+    idempotencyKey: "send-now",
+  };
+}
+
 export const STORE_VOICE_LISTENING_TEXT = "Summarize this thread, then draft the next reply.";
 
 export const VOICE_REVIEW_FIXTURE_DRAFT: VoiceDraft = {
@@ -186,6 +195,13 @@ export function simulatorFixtureViewPlan(mode: SimulatorFixtureMode, search = ""
       voiceText: STORE_VOICE_LISTENING_TEXT,
     };
   }
+  if (mode === "sendNow") {
+    return {
+      action: "store-voice",
+      pendingSessionVoice: simulatorSendNowPendingSessionVoice(),
+      voiceText: "",
+    };
+  }
   if (mode === "voiceReview") {
     return {
       action: "voice-review",
@@ -210,7 +226,8 @@ export function isSimulatorFixtureMode(value: string): value is SimulatorFixture
     || value === "approval"
     || value === "recovery"
     || value === "storeChat"
-    || value === "storeVoice";
+    || value === "storeVoice"
+    || value === "sendNow";
 }
 
 export function simulatorFixtureModeFromSearch(search: string, isDev: boolean) {

@@ -58,8 +58,10 @@ type SimulatorEvidence = {
   consolePath?: string;
   enabled: boolean;
   error?: string;
+  approvalStates: unknown[];
   glassStates: unknown[];
   sessionStates: unknown[];
+  voiceStates: unknown[];
   visible: boolean;
 };
 
@@ -73,6 +75,8 @@ const DEFAULT_OPENCLAW_URL = process.env.EVENG2_E2E_OPENCLAW_URL || "";
 const DEFAULT_OPENCLAW_TOKEN = process.env.EVENG2_E2E_OPENCLAW_TOKEN || "";
 const E2E_GLASS_MARKER = "[openclaw-even-g2-node:e2e:glass]";
 const E2E_SESSION_MARKER = "[openclaw-even-g2-node:e2e:session]";
+const E2E_VOICE_MARKER = "[openclaw-even-g2-node:e2e:voice]";
+const E2E_APPROVAL_MARKER = "[openclaw-even-g2-node:e2e:approval]";
 
 const HELP = `Collect an agent-review evidence bundle for Even G2 user-story E2E review.
 
@@ -226,6 +230,14 @@ export function parseE2eSessionMarkers(consoleText: string): unknown[] {
   return parseE2eMarkers(consoleText, E2E_SESSION_MARKER);
 }
 
+export function parseE2eVoiceMarkers(consoleText: string): unknown[] {
+  return parseE2eMarkers(consoleText, E2E_VOICE_MARKER);
+}
+
+export function parseE2eApprovalMarkers(consoleText: string): unknown[] {
+  return parseE2eMarkers(consoleText, E2E_APPROVAL_MARKER);
+}
+
 function writeJson(filePath: string, value: unknown) {
   fs.writeFileSync(filePath, `${JSON.stringify(redactValue(value), null, 2)}\n`);
 }
@@ -302,7 +314,7 @@ function openClawGatewayArgs(args: ParsedArgs, commandArgs: string[]) {
 }
 
 async function collectSimulatorEvidence(args: ParsedArgs, outDir: string): Promise<SimulatorEvidence> {
-  if (args.skipSimulator) return { enabled: false, glassStates: [], sessionStates: [], visible: false };
+  if (args.skipSimulator) return { approvalStates: [], enabled: false, glassStates: [], sessionStates: [], voiceStates: [], visible: false };
   const consolePath = path.join(outDir, "simulator-console.txt");
   try {
     const capture = await captureSimulator(args.simulatorUrl, outDir, "agent-review");
@@ -313,8 +325,10 @@ async function collectSimulatorEvidence(args: ParsedArgs, outDir: string): Promi
       capture,
       consolePath,
       enabled: true,
+      approvalStates: parseE2eApprovalMarkers(consoleText),
       glassStates: parseE2eGlassMarkers(consoleText),
       sessionStates: parseE2eSessionMarkers(consoleText),
+      voiceStates: parseE2eVoiceMarkers(consoleText),
       visible: true,
     };
   } catch (error) {
@@ -322,8 +336,10 @@ async function collectSimulatorEvidence(args: ParsedArgs, outDir: string): Promi
       consolePath,
       enabled: true,
       error: errorStack(error),
+      approvalStates: [],
       glassStates: [],
       sessionStates: [],
+      voiceStates: [],
       visible: false,
     };
   }
@@ -396,6 +412,16 @@ function deterministicChecks(simulator: SimulatorEvidence, openclaw: OpenClawEvi
       detail: simulator.enabled ? `${simulator.sessionStates.length} e2e session state marker(s)` : "simulator skipped",
     },
     {
+      name: "voice-state-marker",
+      ok: true,
+      detail: simulator.enabled ? `${simulator.voiceStates.length} e2e voice state marker(s)` : "simulator skipped",
+    },
+    {
+      name: "approval-state-marker",
+      ok: true,
+      detail: simulator.enabled ? `${simulator.approvalStates.length} e2e approval state marker(s)` : "simulator skipped",
+    },
+    {
       name: "openclaw-node-status",
       ok: !openclaw.enabled || (openclaw.nodeStatus?.ok === true && nodeStatusHasConnectedNode(openclaw)),
       detail: openclaw.enabled ? openclaw.nodeStatus?.stderr || openclaw.nodeStatus?.stdout || "nodes status ok" : "OpenClaw skipped",
@@ -442,6 +468,8 @@ Review rules:
 - Do not require exact wording when the visible state clearly satisfies the story.
 - Do fail phone-chat, provider-key, model-picker, or Gateway-settings ownership regressions.
 - Use screenshots as visual evidence and state/OpenClaw data as semantic evidence.
+- Use glassStates, sessionStates, voiceStates, and approvalStates as structured
+  simulator evidence when present.
 - Mark missing evidence as inconclusive instead of guessing.
 - If OpenClaw node evidence exists, compare nodes.status / canvas.snapshot with the simulator state.
 

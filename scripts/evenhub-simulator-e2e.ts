@@ -6,7 +6,7 @@ import {
   type SimulatorCapture,
 } from "./simulator-utils.js";
 
-type SimFlow = "auto" | "setup" | "session" | "sessionSelector" | "voiceReview" | "canvas" | "canvasTutorial" | "approval" | "recovery" | "storeChat" | "storeVoice";
+type SimFlow = "auto" | "setup" | "session" | "sessionSelector" | "voiceReview" | "canvas" | "canvasTutorial" | "approval" | "recovery" | "storeChat" | "storeVoice" | "sendNow";
 
 const BASE_URL = process.env.EVENG2_SIMULATOR_URL || "http://127.0.0.1:9898";
 const OUT_DIR = process.env.EVENG2_SIMULATOR_OUT_DIR || "/tmp";
@@ -25,6 +25,7 @@ function normalizeFlow(value: string | undefined): SimFlow {
     || value === "recovery"
     || value === "storeChat"
     || value === "storeVoice"
+    || value === "sendNow"
   ) return value;
   return "auto";
 }
@@ -152,11 +153,17 @@ async function runVisualFixtureFlow(initial: SimulatorCapture, flow: Exclude<Sim
   } else if (flow === "approval") {
     steps.push(stepEvidence("approval-rerender", await inputAndCapture("up", "approval-rerender"), "up"));
     steps.push(stepEvidence("approval-allow", await inputAndCapture("click", "approval-allow"), "click"));
+    const approvalConsole = await waitForConsoleText("eveng2.approval.resolve.ack", 5_000);
+    if (!approvalConsole.includes("eveng2.approval.resolved")) {
+      throw new Error("Expected approval resolved console marker after allow.");
+    }
   } else if (flow === "storeChat") {
     steps.push(stepEvidence("store-chat-previous", await inputAndCapture("up", "store-chat-up"), "up"));
     steps.push(stepEvidence("store-chat-latest", await inputAndCapture("down", "store-chat-down"), "down"));
   } else if (flow === "storeVoice") {
     steps.push(stepEvidence("store-voice-cancel", await inputAndCapture("double_click", "store-voice-cancel"), "double_click"));
+  } else if (flow === "sendNow") {
+    steps.push(stepEvidence("send-now-cancel", await inputAndCapture("double_click", "send-now-cancel"), "double_click"));
   }
   return {
     flow,
