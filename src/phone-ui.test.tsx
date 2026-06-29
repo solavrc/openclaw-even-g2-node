@@ -1,6 +1,6 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "./main";
 import {
   voiceFailureKind,
@@ -26,6 +26,31 @@ type ReactActGlobal = typeof globalThis & {
 
 let container: HTMLDivElement;
 let root: Root;
+
+class FakeUiWebSocket extends EventTarget {
+  static readonly CONNECTING = 0;
+  static readonly OPEN = 1;
+  static readonly CLOSING = 2;
+  static readonly CLOSED = 3;
+  readonly CONNECTING = FakeUiWebSocket.CONNECTING;
+  readonly OPEN = FakeUiWebSocket.OPEN;
+  readonly CLOSING = FakeUiWebSocket.CLOSING;
+  readonly CLOSED = FakeUiWebSocket.CLOSED;
+  readyState = FakeUiWebSocket.CONNECTING;
+
+  constructor(readonly url: string) {
+    super();
+  }
+
+  send() {
+    // Phone UI tests should not open real Gateway sockets.
+  }
+
+  close() {
+    this.readyState = FakeUiWebSocket.CLOSED;
+    this.dispatchEvent(new CloseEvent("close"));
+  }
+}
 
 async function renderApp(search = "/?disableEvenBridge=1") {
   container = document.createElement("div");
@@ -61,6 +86,7 @@ async function rerenderWithSearch(search: string) {
 
 describe("phone setup surface", () => {
   beforeEach(async () => {
+    vi.stubGlobal("WebSocket", FakeUiWebSocket);
     localStorage.clear();
     await renderApp();
   });
@@ -70,6 +96,7 @@ describe("phone setup surface", () => {
       root.unmount();
     });
     container.remove();
+    vi.unstubAllGlobals();
   });
 
   it("keeps setup/status visible without making phone controls the primary workflow", () => {
