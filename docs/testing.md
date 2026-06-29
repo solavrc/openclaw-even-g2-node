@@ -248,6 +248,8 @@ pnpm e2e:agent
 - OpenClaw `nodes status` and `canvas.snapshot` command evidence when the
   local `openclaw` CLI can reach the active Gateway;
 - `review-prompt.md`, which tells the Coding Agent how to judge the run;
+- `llm-review.schema.md`, which fixes the expected fuzzy-review shape and
+  verdict meanings;
 - `llm-review.template.json`, which the Coding Agent can replace with its
   structured verdict.
 
@@ -363,6 +365,19 @@ an OpenClaw-routed agent. The reviewer should return `pass`, `warn`, `fail`, or
 judge semantic user-story fit rather than exact wording, and fail regressions
 where the phone becomes the primary chat surface or provider/Gateway ownership
 moves into the app.
+
+After writing `llm-review.json`, validate the shape before treating it as
+review evidence:
+
+```bash
+pnpm e2e:agent:review:validate -- .openclaw-even-g2-node/e2e-agent-runs/<run-id>
+```
+
+The validator requires exactly one review for each `story-1` through `story-8`,
+confidence values from `0` to `1`, string arrays for evidence/concerns/fixes,
+and one of `pass`, `warn`, `fail`, or `inconclusive` for every verdict. Use
+`warn` when observed behavior looks aligned but the evidence scope is incomplete;
+reserve `fail` for observed behavior that contradicts `docs/user-stories.md`.
 
 There is also a manual GitHub Actions workflow, `Simulator Fixtures`, that runs
 the same command under `xvfb-run` and uploads the fixture report plus captured
@@ -555,6 +570,7 @@ failure.
 | `pnpm e2e:agent` | Agentic local review | Collects simulator/OpenClaw evidence and writes a prompt for Coding Agent fuzzy review. |
 | `pnpm e2e:agent:live` | Agentic local review | Same as `e2e:agent`, but also invokes `canvas.present` on the active OpenClaw node. |
 | `pnpm e2e:agent:isolated` | Agentic local review | Starts a fresh test Gateway profile, pairs the simulator, resolves connected nodeId, and runs live evidence collection. |
+| `pnpm e2e:agent:review:validate` | Agentic local review | Validates `llm-review.json` against the required fuzzy-review schema. |
 | `pnpm run pack` | Packaging | Builds and writes `openclaw-even-g2-node.ehpk`. |
 | `pnpm release:check` | CI / release gate | Runs broad release checks; release status separately reports the runtime Gateway whitelist review risk. |
 | `pnpm release:bundle` | Release artifact | Creates the local release bundle directory and prints the full bundle manifest JSON. |

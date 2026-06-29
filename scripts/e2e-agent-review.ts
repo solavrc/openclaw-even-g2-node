@@ -4,6 +4,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { gitMetadata } from "./git-state.ts";
+import { createLlmReviewTemplate, LLM_REVIEW_STORY_IDS, LLM_REVIEW_VERDICTS } from "./llm-review-schema.ts";
 import {
   assertCaptureLooksVisible,
   captureSimulator,
@@ -431,11 +432,12 @@ Return JSON in this shape:
 
 \`\`\`json
 {
-  "overallVerdict": "pass | warn | fail | inconclusive",
+  "overallVerdict": "${LLM_REVIEW_VERDICTS.join(" | ")}",
+  "summary": "",
   "storyReviews": [
     {
-      "storyId": "story-1",
-      "verdict": "pass | warn | fail | inconclusive",
+      "storyId": "${LLM_REVIEW_STORY_IDS.join(" | ")}",
+      "verdict": "${LLM_REVIEW_VERDICTS.join(" | ")}",
       "confidence": 0.0,
       "summary": "",
       "matchedEvidence": [],
@@ -446,7 +448,54 @@ Return JSON in this shape:
   "nextActions": []
 }
 \`\`\`
+
+The final file must be valid according to llm-review.schema.md and should be
+saved as llm-review.json in the bundle directory. Include all story ids exactly
+once. Use "warn" for scoped evidence gaps that do not indicate a behavior
+mismatch; use "fail" only when observed behavior contradicts docs/user-stories.md.
 `;
+}
+
+function buildReviewSchemaDoc() {
+  return [
+    "# LLM Review Schema",
+    "",
+    "The Coding Agent must write `llm-review.json` as a single JSON object.",
+    "",
+    `Allowed verdicts: ${LLM_REVIEW_VERDICTS.join(", ")}.`,
+    `Required story ids: ${LLM_REVIEW_STORY_IDS.join(", ")}.`,
+    "",
+    "Required top-level fields:",
+    "",
+    "- `overallVerdict`: one allowed verdict.",
+    "- `summary`: optional string.",
+    "- `storyReviews`: exactly one object for each required story id.",
+    "- `nextActions`: array of strings.",
+    "",
+    "Required story review fields:",
+    "",
+    "- `storyId`: one required story id, with no duplicates.",
+    "- `verdict`: one allowed verdict.",
+    "- `confidence`: number from 0 to 1.",
+    "- `summary`: non-empty string.",
+    "- `matchedEvidence`: array of strings.",
+    "- `concerns`: array of strings.",
+    "- `requiredFixes`: array of strings.",
+    "",
+    "Verdict guidance:",
+    "",
+    "- `pass`: observed evidence satisfies the story.",
+    "- `warn`: no observed mismatch, but important evidence is missing or scoped out.",
+    "- `fail`: observed behavior contradicts `docs/user-stories.md`.",
+    "- `inconclusive`: evidence is too thin to judge the story.",
+    "",
+    "Validate with:",
+    "",
+    "```bash",
+    "pnpm e2e:agent:review:validate -- <run-dir>",
+    "```",
+    "",
+  ].join("\n");
 }
 
 function buildReport(input: {
@@ -477,6 +526,7 @@ function buildReport(input: {
     ] : []),
     "",
     "Next step: a Coding Agent should read review-prompt.md and evidence.json, then write llm-review.json with fuzzy user-story verdicts.",
+    "Validate it with: pnpm e2e:agent:review:validate -- <this-run-directory>",
     "",
   ].join("\n");
 }
@@ -502,6 +552,7 @@ async function main() {
   const reviewPromptPath = path.join(args.outDir, "review-prompt.md");
   const reportPath = path.join(args.outDir, "report.md");
   const reviewTemplatePath = path.join(args.outDir, "llm-review.template.json");
+  const reviewSchemaPath = path.join(args.outDir, "llm-review.schema.md");
 
   const evidence = {
     deterministic,
@@ -518,6 +569,7 @@ async function main() {
     files: {
       evidence: evidencePath,
       report: reportPath,
+      reviewSchema: reviewSchemaPath,
       reviewPrompt: reviewPromptPath,
       reviewTemplate: reviewTemplatePath,
       userStoriesSnapshot: userStoriesSnapshotPath,
@@ -532,11 +584,8 @@ async function main() {
     manifestPath,
     userStoriesPath: userStoriesSnapshotPath,
   }));
-  writeJson(reviewTemplatePath, {
-    overallVerdict: "inconclusive",
-    storyReviews: [],
-    nextActions: ["Read review-prompt.md and evidence.json, then replace this template with the agent review."],
-  });
+  writeJson(reviewTemplatePath, createLlmReviewTemplate());
+  fs.writeFileSync(reviewSchemaPath, buildReviewSchemaDoc());
   fs.writeFileSync(reportPath, buildReport({
     deterministic,
     evidencePath,

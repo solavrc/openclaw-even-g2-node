@@ -109,6 +109,8 @@ describe("e2e agent review helpers", () => {
     expect(prompt).toContain("fuzzy state");
     expect(prompt).toContain("docs/user-stories.md");
     expect(prompt).toContain("overallVerdict");
+    expect(prompt).toContain("llm-review.schema.md");
+    expect(prompt).toContain("story-1 | story-2");
     expect(prompt).toContain("/tmp/run/evidence.json");
   });
 });
