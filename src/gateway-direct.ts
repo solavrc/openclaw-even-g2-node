@@ -669,16 +669,20 @@ function looksLikeEvenG2Node(value: Record<string, unknown>) {
   );
 }
 
+function nodeDeviceId(value: Record<string, unknown>) {
+  const device = asObject(value.device);
+  return asString(value.deviceId) || asString(device?.id);
+}
+
 function isPendingNodeApproval(value: Record<string, unknown>) {
   const approvalState = asString(value.approvalState).toLowerCase();
   return approvalState === "pending-approval" || approvalState === "pending-reapproval";
 }
 
 function evenG2NodeSnapshotFromCatalogRow(value: Record<string, unknown>, fallbackDeviceId = "") {
-  const device = asObject(value.device);
   return {
     nodeId: asString(value.nodeId),
-    deviceId: asString(value.deviceId) || asString(device?.id) || fallbackDeviceId,
+    deviceId: nodeDeviceId(value) || fallbackDeviceId,
     displayName: asString(value.displayName) || "Even G2",
     platform: asString(value.platform) || "even-g2",
     deviceFamily: asString(value.deviceFamily) || "glasses",
@@ -774,6 +778,8 @@ export class GatewayDirectTransport extends EventTarget {
   private operatorSession: GatewayWsSession | null = null;
   private voiceTransport: GatewayDirectVoiceTransport | null = null;
   private selectedSessionKey: string;
+  private connectedDeviceId = "";
+  private connectedNodeId = "";
   private nodeInvokeNodeIds = new Map<string, string>();
   private nodeSessionOpen = false;
   private gatewayClientId: GatewayClientId = "openclaw-even-g2-node";
@@ -814,7 +820,8 @@ export class GatewayDirectTransport extends EventTarget {
       permissions: {},
       client: buildEvenG2ClientInfo("node", this.instanceId, clientId),
       onOpen: (_hello, identity) => {
-        if (this.nodeSession !== session) return;
+        if (this.nodeSession !== session || this.readyState === WebSocket.CLOSED) return;
+        this.connectedDeviceId = identity.deviceId;
         this.nodeSessionOpen = true;
         this.emit({
           type: "eveng2.runtime.status",
@@ -856,10 +863,14 @@ export class GatewayDirectTransport extends EventTarget {
     this.nodeSessionOpen = false;
     this.clearNodeApprovalPoll();
     const voice = this.voiceTransport;
+    const nodeSession = this.nodeSession;
+    const operatorSession = this.operatorSession;
     this.voiceTransport = null;
+    this.nodeSession = null;
+    this.operatorSession = null;
     voice?.close();
-    this.nodeSession?.close();
-    this.operatorSession?.close();
+    nodeSession?.close();
+    operatorSession?.close();
     this.dispatchEvent(makeTransportCloseEvent(reason));
   }
 
@@ -1185,15 +1196,17 @@ export class GatewayDirectTransport extends EventTarget {
       const root = asObject(payload);
       const rows = Array.isArray(root?.nodes) ? root.nodes : Array.isArray(payload) ? payload : [];
       const nodes = rows.map((row) => asObject(row)).filter((row): row is Record<string, unknown> => Boolean(row));
-      const current = nodes.find((node) => looksLikeEvenG2Node(node));
+      const candidates = nodes.filter((node) => looksLikeEvenG2Node(node));
+      const current = this.nodeForCurrentDevice(candidates);
       if (current) {
+        this.rememberCatalogNode(current);
         this.emit({
           type: "eveng2.runtime.status",
           session: this.selectedSessionKey,
-          node: evenG2NodeSnapshotFromCatalogRow(current),
+          node: evenG2NodeSnapshotFromCatalogRow(current, this.connectedDeviceId),
         });
       }
-      const pending = nodes.find((node) => looksLikeEvenG2Node(node) && isPendingNodeApproval(node));
+      const pending = this.nodeForCurrentDevice(candidates.filter((node) => isPendingNodeApproval(node)));
       if (!pending) {
         if (this.nodeApprovalPending) this.emit({ type: "eveng2.node.approval.ready" });
         this.nodeApprovalPending = false;
@@ -1235,7 +1248,30 @@ export class GatewayDirectTransport extends EventTarget {
   }
 
   private fail(error: Error) {
-    this.emit({ type: "error", error: error.message });
+    const gatewayError = error instanceof GatewayConnectError ? error.gatewayError : undefined;
+    this.emit({
+      type: "error",
+      error: error.message,
+      ...(gatewayError?.details?.pauseReconnect ? { pauseReconnect: true } : {}),
+    });
+  }
+
+  private nodeForCurrentDevice(nodes: Record<string, unknown>[]) {
+    if (this.connectedNodeId) {
+      const byNodeId = nodes.find((node) => asString(node.nodeId) === this.connectedNodeId);
+      if (byNodeId) return byNodeId;
+    }
+    if (this.connectedDeviceId) {
+      return nodes.find((node) => nodeDeviceId(node) === this.connectedDeviceId);
+    }
+    return nodes[0];
+  }
+
+  private rememberCatalogNode(node: Record<string, unknown>) {
+    const nodeId = asString(node.nodeId);
+    if (nodeId) this.connectedNodeId = nodeId;
+    const deviceId = nodeDeviceId(node);
+    if (deviceId) this.connectedDeviceId = deviceId;
   }
 
   private handleNodeConnectError(error: Error) {

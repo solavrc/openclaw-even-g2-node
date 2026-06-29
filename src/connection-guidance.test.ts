@@ -35,6 +35,20 @@ describe("connectionErrorPresentationPlan", () => {
     });
   });
 
+  it("does not request automatic reconnect for authentication pauses", () => {
+    expect(connectionErrorPresentationPlan(
+      "error: too many failed authentication attempts",
+      "too many failed authentication attempts",
+      true,
+    )).toMatchObject({
+      target: "guidance",
+      guidance: {
+        title: "OpenClaw authentication paused",
+      },
+      reconnectReason: "",
+    });
+  });
+
   it("falls back to a glass error frame when no guidance matches", () => {
     const plan = connectionErrorPresentationPlan(
       "waiting",

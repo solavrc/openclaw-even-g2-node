@@ -51,7 +51,7 @@ export type GatewayMessage =
   | { type: "eveng2.node.command"; id?: string; nodeId?: string; command?: string; params?: Record<string, unknown>; timeoutMs?: number }
   | { type: "eveng2.node.approval.required"; nodeId?: string; requestId?: string; approvalState?: string; commands?: string[] }
   | { type: "eveng2.node.approval.ready" }
-  | { type: "error"; id?: string; error: string }
+  | { type: "error"; id?: string; error: string; pauseReconnect?: boolean }
   | { type: "pong"; ts: number };
 
 export type GatewayTransport = Pick<WebSocket, "readyState" | "send" | "close" | "addEventListener"> & {
@@ -212,11 +212,13 @@ export function runtimeStatusSessionUpdate(
   currentSessionKey: string,
 ) {
   const nextSessionKey = sessionKeyFromRuntimeStatusMessage(message);
+  const hasNodeSnapshot = Object.prototype.hasOwnProperty.call(message, "node");
   return {
     nextSessionKey,
     changed: Boolean(nextSessionKey && nextSessionKey !== currentSessionKey),
     shouldRequestTranscript: Boolean(nextSessionKey && nextSessionKey !== currentSessionKey),
-    nodeSnapshot: message.node || null,
+    hasNodeSnapshot,
+    nodeSnapshot: hasNodeSnapshot ? message.node || null : null,
   };
 }
 

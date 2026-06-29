@@ -811,7 +811,10 @@ export function App() {
         dataUrl,
         alt: `OpenClaw prompt: ${options.ask}`,
       });
-      return renderGlassImageCanvas(bridge, tiles);
+      const rendered = await renderGlassImageCanvas(bridge, tiles);
+      if (rendered) return true;
+      devLog("[Even G2] OpenClaw ask canvas image refused; rendering text fallback");
+      return renderGlass(openClawAskFallbackFrame(options), bridge);
     } catch (error) {
       devLog("[Even G2] OpenClaw ask canvas failed", error);
       return renderGlass(openClawAskFallbackFrame(options), bridge);
@@ -1837,7 +1840,7 @@ export function App() {
         setActiveSessionKey(update.nextSessionKey);
         if (update.shouldRequestTranscript) requestSessionTranscript(update.nextSessionKey);
       }
-      if (update.nodeSnapshot) setActiveNodeSnapshot(update.nodeSnapshot);
+      if (update.hasNodeSnapshot) setActiveNodeSnapshot(update.nodeSnapshot);
     }
     if (!pendingSessionVoiceRef.current) setStatus("ready");
     if (glassViewRef.current === "sessionHome") renderGlassSessionHome("ready");
@@ -1998,7 +2001,7 @@ export function App() {
     setStatus(nextStatus);
     if (plan.target === "guidance") void renderConnectionGuidance(plan.statusText);
     else void renderGlass(plan.frame);
-    scheduleReconnect(plan.reconnectReason);
+    if (!msg.pauseReconnect && plan.reconnectReason) scheduleReconnect(plan.reconnectReason);
   }
 
   function handleGatewayMessage(ws: GatewayTransport, msg: GatewayMessage) {

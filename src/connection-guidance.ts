@@ -17,7 +17,7 @@ export type ConnectionErrorPresentationPlan =
     target: "guidance";
     statusText: string;
     guidance: ConnectionGuidance;
-    reconnectReason: "needs attention";
+    reconnectReason: "needs attention" | "";
   }
   | {
     target: "glass-error";
@@ -261,7 +261,7 @@ export function connectionErrorPresentationPlan(
       target: "guidance",
       statusText,
       guidance,
-      reconnectReason: "needs attention",
+      reconnectReason: guidance.title === "OpenClaw authentication paused" ? "" : "needs attention",
     };
   }
   return {
