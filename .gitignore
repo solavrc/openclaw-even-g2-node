@@ -1,8 +1,12 @@
 node_modules/
 dist/
 *.ehpk
+*.tgz
 output/
 release/
+tmp/
+glasses_*.png
+.openclaw-even-g2-node/
 .playwright-cli/
 .DS_Store
 *.log
