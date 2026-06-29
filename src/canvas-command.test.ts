@@ -182,6 +182,10 @@ describe("canvas command result helpers", () => {
       view: "canvas",
       previewText: "main · note\n\nHello\n\npushed by gateway",
     });
+    expect(textCanvasPresentationState("Check 🔌")).toMatchObject({
+      text: "main · note\n\nCheck [emoji]\n\npushed by gateway",
+      previewText: "main · note\n\nCheck [emoji]\n\npushed by gateway",
+    });
   });
 
   it("builds present command result payloads", () => {

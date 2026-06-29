@@ -14,6 +14,16 @@ describe("glass text normalization", () => {
     expect(replaceUnsupportedGlassGlyphs("🇯🇵 1️⃣")).toBe("[emoji] [emoji]");
   });
 
+  it("drops ignored modifiers when Intl.Segmenter is unavailable", () => {
+    const originalSegmenter = Intl.Segmenter;
+    Object.defineProperty(Intl, "Segmenter", { configurable: true, value: undefined });
+    try {
+      expect(replaceUnsupportedGlassGlyphs("▶️ ⚙️")).toBe("▶ [emoji]");
+    } finally {
+      Object.defineProperty(Intl, "Segmenter", { configurable: true, value: originalSegmenter });
+    }
+  });
+
   it("leaves ordinary text unchanged while normalizing unsupported glyphs", () => {
     expect(cleanGlassText(" 日本語 tabs\tand `code` 🔌  ")).toBe("日本語 tabs and 'code' [emoji]");
   });

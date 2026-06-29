@@ -37,6 +37,7 @@ function isEmojiLikeCluster(cluster: string) {
 export function replaceUnsupportedGlassGlyphs(text: string) {
   return graphemeClusters(text).map((cluster) => {
     if (!cluster) return "";
+    if (visibleCodePoints(cluster).length === 0) return "";
     if (isDocumentedGlyphCluster(cluster)) return documentedGlyphClusterText(cluster);
     if (AUDITED_EVEN_G2_EMOJI_GLYPHS.has(cluster)) return cluster;
     if (!isEmojiLikeCluster(cluster)) return cluster;
