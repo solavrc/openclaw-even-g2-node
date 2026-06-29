@@ -1152,6 +1152,33 @@ describe("Gateway direct voice", () => {
     expect(errorListener).not.toHaveBeenCalled();
   });
 
+  it("keeps the node session open when the operator session is not yet authorized", () => {
+    const gateway = new GatewayDirectTransport({
+      setupCodeOrUrl: "ws://127.0.0.1:18789",
+      token: "",
+    });
+    const session = {};
+    const messages: Array<Record<string, unknown>> = [];
+    gateway.addEventListener("message", (event) => {
+      messages.push(JSON.parse((event as MessageEvent).data as string) as Record<string, unknown>);
+    });
+    Reflect.set(gateway, "nodeSessionOpen", true);
+    Reflect.set(gateway, "operatorSession", session);
+
+    const handleOperatorSessionError = Reflect.get(gateway, "handleOperatorSessionError");
+    if (typeof handleOperatorSessionError !== "function") throw new Error("GatewayDirectTransport.handleOperatorSessionError is unavailable");
+    handleOperatorSessionError.call(gateway, new Error("unauthorized: gateway token missing"), session);
+
+    expect(gateway.readyState).toBe(gateway.CONNECTING);
+    expect(gateway.canSendNodeCommandResult()).toBe(true);
+    expect(Reflect.get(gateway, "operatorSession")).toBeNull();
+    expect(messages).toContainEqual({
+      type: "error",
+      error: "unauthorized: gateway token missing",
+      pauseReconnect: true,
+    });
+  });
+
   it("sends node command results while only the node session is open", async () => {
     const gateway = new GatewayDirectTransport({
       setupCodeOrUrl: "ws://127.0.0.1:18789",

@@ -676,7 +676,7 @@ export type DirectTransportMessage =
   | { type: "eveng2.approval.request"; id?: string; requestId?: string; command?: string; cwd?: string | null; ask?: string | null; security?: string | null }
   | { type: "eveng2.approval.resolved"; id?: string; requestId?: string; decision?: string | null }
   | { type: "eveng2.approval.resolve.ack"; id?: string; requestId?: string; decision?: string | null; status: string; message?: string | null; error?: string }
-  | { type: "error"; id?: string; error: string };
+  | { type: "error"; id?: string; error: string; pauseReconnect?: boolean };
 
 export type DirectTransportOptions = {
   setupCodeOrUrl: string;
@@ -1025,19 +1025,17 @@ export class GatewayDirectTransport extends EventTarget {
       },
       onError: (error) => {
         if (this.operatorSession !== session) return;
-        this.fail(error);
+        this.handleOperatorSessionError(error, session);
       },
       onClose: (event) => {
         if (this.operatorSession !== session) return;
-        const reason = closeReasonFromEvent(event);
-        if (reason) this.fail(new Error(reason));
-        this.close(undefined, reason);
+        this.handleOperatorSessionClosed(event, session);
       },
     });
     this.operatorSession = session;
     void session.connect().catch((error: unknown) => {
       if (this.operatorSession !== session) return;
-      this.fail(error instanceof Error ? error : new Error(String(error)));
+      this.handleOperatorSessionError(error instanceof Error ? error : new Error(String(error)), session);
     });
   }
 
@@ -1347,6 +1345,28 @@ export class GatewayDirectTransport extends EventTarget {
       error: error.message,
       ...(gatewayError?.details?.pauseReconnect ? { pauseReconnect: true } : {}),
     });
+  }
+
+  private handleOperatorSessionError(error: Error, session: GatewayWsSession) {
+    if (this.operatorSession !== session) return;
+    if (this.nodeSessionOpen) {
+      this.operatorSession = null;
+      this.emit({ type: "error", error: error.message, pauseReconnect: true });
+      return;
+    }
+    this.fail(error);
+  }
+
+  private handleOperatorSessionClosed(event: CloseEvent | undefined, session: GatewayWsSession) {
+    if (this.operatorSession !== session) return;
+    const reason = closeReasonFromEvent(event);
+    if (this.nodeSessionOpen) {
+      this.operatorSession = null;
+      if (reason) this.emit({ type: "error", error: reason, pauseReconnect: true });
+      return;
+    }
+    if (reason) this.fail(new Error(reason));
+    this.close(undefined, reason);
   }
 
   private nodeForCurrentDevice(nodes: Record<string, unknown>[]) {
