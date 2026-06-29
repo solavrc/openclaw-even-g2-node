@@ -23,13 +23,13 @@ describe("gateway connection state", () => {
   });
 
   it("formats node approval statuses", () => {
-    expect(nodeApprovalRequiredStatus("request-1")).toBe("node approval required (requestId: request-1)");
-    expect(nodeApprovalRequiredStatus(undefined)).toBe("node approval required");
+    expect(nodeApprovalRequiredStatus()).toBe("node approval required");
   });
 
   it("detects node approval statuses that can return to ready", () => {
     expect(shouldRestoreReadyAfterNodeApproval("node approval required")).toBe(true);
     expect(shouldRestoreReadyAfterNodeApproval("node approval required (requestId: request-1)")).toBe(true);
+    expect(shouldRestoreReadyAfterNodeApproval("node approval required; checking")).toBe(true);
     expect(shouldRestoreReadyAfterNodeApproval("ready")).toBe(false);
   });
 

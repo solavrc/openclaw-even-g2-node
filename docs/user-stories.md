@@ -19,7 +19,7 @@ The glasses show the product name and the OpenClaw-side request:
 ```text
 OpenClaw Node
 Ask OpenClaw with:
-"Hey Claw, show my Even G2 setup QR."
+"Hey Claw, show my Even G2 setup QR. See solavrc/openclaw-even-g2-node."
 scan QR on phone
 ```
 
@@ -32,6 +32,14 @@ The phone shows setup state and keeps setup actions on the status surface:
 
 Success condition: the user knows to get a setup QR from OpenClaw and scan it
 with the phone.
+
+The phone also shows a compact readiness checklist covering setup QR, Gateway
+route, device/operator approval, node tools approval, selected session, live G2
+bridge, and voice verification. The checklist summarizes state; the next
+action remains a single setup, approval, retry, or voice-check action.
+After onboarding, the checklist remains a health surface instead of disappearing
+or becoming a completed wizard. The top node summary should avoid repeating the
+same Gateway, node, bridge, and voice facts that the checklist already shows.
 
 ### 1.2 Scan Gateway setup QR
 
@@ -440,6 +448,11 @@ Expected behavior:
 - the optional Review provider preference is chosen from Gateway
   `talk.catalog`, but live success is proven only when Talk reaches ready state
   and returns transcript text.
+- after `talk.catalog` lists a usable provider, the phone still treats Review
+  as unverified until one short glasses recording returns transcript text.
+- when Review needs Gateway setup, the node status surface exposes a `Set up
+  voice` action that opens the voice setup request instead of leaving the user
+  to hunt through advanced panels.
 
 Success condition: users who care about transcript quality can inspect text
 before the selected session is modified.
@@ -544,7 +557,29 @@ Expected behavior:
 Success condition: an OpenClaw workflow can discover how to send text, message,
 notification, or inline image content to the glasses.
 
-### 6.2 Present text canvas content
+### 6.2 Introduce canvas after node approval
+
+The user should discover that OpenClaw can draw on the glasses without needing
+to read protocol documentation during first setup.
+
+Expected behavior:
+
+- after node command approval becomes available, the glasses show the canvas
+  tutorial if it has not already completed;
+- the phone readiness checklist shows Canvas tutorial as optional while the
+  tutorial is pending;
+- the tutorial asks the user to have OpenClaw send a tiny visual surprise to
+  the Even G2 glasses;
+- receiving a real `canvas.present` command completes the tutorial;
+- tapping the glasses skips the tutorial and returns to the selected-session
+  loop;
+- the completion state is stored locally so the tutorial does not keep
+  reappearing after first completion.
+
+Success condition: the first successful node approval naturally leads to a
+real canvas smoke test without blocking normal glasses use.
+
+### 6.3 Present text canvas content
 
 When an OpenClaw workflow invokes `canvas.present` with text-like fields, the
 glasses show that content on the compact HUD surface.
@@ -561,7 +596,7 @@ Expected behavior:
 Success condition: OpenClaw can push readable text to the glasses and the user
 can dismiss it from the glasses.
 
-### 6.3 Present inline image canvas content
+### 6.4 Present inline image canvas content
 
 When an OpenClaw workflow invokes `canvas.present` with inline image data, the
 glasses show the image scaled to the Even G2 display.
@@ -580,7 +615,7 @@ Expected behavior:
 Success condition: generated visual output can appear on the glasses without
 turning the client into an arbitrary remote media fetcher.
 
-### 6.4 Present short messages and notifications
+### 6.5 Present short messages and notifications
 
 Some OpenClaw workflows need short-lived HUD updates rather than persistent
 canvas content.
@@ -597,7 +632,7 @@ Expected behavior:
 Success condition: OpenClaw can send compact status or notification updates to
 the glasses without permanently replacing the session view.
 
-### 6.5 Hide and inspect canvas state
+### 6.6 Hide and inspect canvas state
 
 OpenClaw can clear or inspect the current canvas state.
 
@@ -613,7 +648,7 @@ Expected behavior:
 Success condition: OpenClaw can verify what it last put on the glasses and can
 clear it intentionally.
 
-### 6.6 Fail clearly when no live glasses bridge exists
+### 6.7 Fail clearly when no live glasses bridge exists
 
 Canvas presentation requires a live Even Hub bridge/client because the command
 operates the active glasses display.
@@ -766,17 +801,23 @@ Expected behavior:
 Success condition: the user knows they need a setup QR before any Gateway
 recovery can happen.
 
-### 8.2 Distinguish Gateway unreachable from Gateway-rejected
+### 8.2 Distinguish Gateway unreachable, origin blocks, and Even Hub network blocks
 
 If a setup URL exists but the WebSocket connection does not complete, the app
-shows that Gateway connection needs attention without treating it as stale
+separates the likely recovery path instead of treating every failure as stale
 pairing by default.
 
 Expected behavior:
 
 - the original connection or WebSocket error remains visible;
-- phone guidance tells the user to check Even Hub network whitelist, Gateway
-  `allowedOrigins`, and Gateway reachability;
+- generic connection failures are labeled `Gateway unreachable from phone` and
+  tell the user to confirm phone reachability, VPN/tailnet state, Gateway
+  status, browser/server CORS, and a secure WSS route for remote access;
+- Gateway origin-policy failures are labeled `Allow this app origin` and point
+  to `gateway.controlUi.allowedOrigins`;
+- Even Hub/package permission failures are labeled
+  `Even Hub network permission likely blocked` when the error indicates
+  network permission, manifest, or whitelist blocking before Gateway answers;
 - the glasses show a short error or guidance frame rather than a phone-only
   diagnostic paragraph;
 - automatic retry may continue with backoff while the setup URL remains
@@ -818,9 +859,11 @@ Expected behavior:
   `openclaw devices list` or `openclaw nodes pending`;
 - glasses guidance prefers short "Ask OpenClaw with..." phrasing and does not
   make long request IDs the primary thing to copy;
-- when a concrete request ID is not trustworthy or complete, the app tells the
-  user to find the Even G2 request instead of rendering a truncated executable
-  command.
+- device/operator request IDs may be rendered only when they come from
+  Gateway-provided connection errors and pass validation;
+- node approval request IDs stay host/OpenClaw Agent state, so the app tells
+  the user to find the Even G2 node request instead of rendering a concrete
+  node approval command.
 
 Success condition: the user can approve the right setup, operator, or node
 request without guessing which trust layer is blocking progress.
@@ -844,23 +887,26 @@ Expected behavior:
 Success condition: the user understands that Gateway is reachable, but auth is
 blocked or rate-limited until approvals or pairing state are corrected.
 
-### 8.6 Retry deliberately
+### 8.6 Retry Or Check Deliberately
 
-When setup exists and the app is not connected, the phone status surface offers
-a direct retry path.
+When setup exists, the phone status surface offers a deliberate recovery action
+that matches the current state.
 
 Expected behavior:
 
 - `Retry now` clears any scheduled reconnect timer and attempts connection
-  immediately;
+  immediately when the app is not connected;
+- `Check again` appears when the app is connected but still waiting on node
+  command approval, and it refreshes Gateway node approval state without
+  clearing setup or pairing;
 - scheduled automatic retry shows countdown copy such as
   `Auto retry in ~Ns`;
 - when the retry timer fires, the status changes to `Retrying now...`;
-- retry does not clear stored pairing or setup data;
-- retry is hidden when the app is already connected.
+- retry/check does not clear stored pairing or setup data;
+- reconnect retry is hidden when the app is already connected.
 
-Success condition: the user can retry after fixing Gateway or approval state
-without losing setup.
+Success condition: the user can retry after fixing Gateway state, or check
+again after approving node tools, without losing setup.
 
 ### 8.7 Set up again when pairing is stale
 
@@ -888,9 +934,10 @@ product boundary.
 
 Expected behavior:
 
-- phone diagnostics include connection state, node status, node approval state,
-  pending node request ID when known, app origin, app version, session key, and
-  recent Even Hub events;
+- phone status/recovery surfaces include node approval guidance, while phone
+  diagnostics include connection state, node status, node approval state, app
+  origin, app version, session key, and recent Even Hub events when debug
+  diagnostics are enabled;
 - node status distinguishes Gateway connectivity from G2 bridge availability;
 - recovery actions stay grouped in setup, status, diagnostics, and connection
   panels;
@@ -915,8 +962,8 @@ For local review or agentic E2E, verify each story at the behavior boundary:
   failure cleanup.
 - Story 5: Review versus Send now behavior, recording limits, direct WAV
   attachment, and Gateway-owned provider setup.
-- Story 6: canvas contract discovery, text/image/message presentation,
-  hide/snapshot, and live-bridge failure semantics.
+- Story 6: canvas contract discovery, first-run tutorial, text/image/message
+  presentation, hide/snapshot, and live-bridge failure semantics.
 - Story 7: runtime approval prompt, glasses allow/deny, matching ack/resolved
   handling, and separation from setup approvals.
 - Story 8: setup-required, network/origin, approval, authentication-pause,

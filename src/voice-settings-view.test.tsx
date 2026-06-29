@@ -67,7 +67,81 @@ describe("ReviewAvailabilityPanel", () => {
     const panel = document.querySelector('[aria-label="Review availability"]');
     expect(panel?.textContent).toContain("Review status");
     expect(panel?.textContent).toContain("Review waits for Gateway");
+    expect(panel?.textContent).toContain("After Gateway setup, verify Review with one short glasses recording.");
     expect((panel?.querySelector("button") as HTMLButtonElement | null)?.disabled).toBe(true);
+  });
+
+  it("shows Review live verification after a returned transcript", async () => {
+    const status: TalkCatalogReviewStatus = {
+      state: "ready",
+      label: "Review provider listed",
+      providerId: "openai",
+      detail: "OpenAI is listed for OpenClaw Talk transcription.",
+      providers: [{ id: "openai", label: "OpenAI" }],
+    };
+
+    await render(
+      <ReviewAvailabilityPanel
+        connected
+        preferredReviewProvider=""
+        reviewVoiceVerifiedAtMs={1700000000000}
+        reviewVoiceVerifiedProviderId="openai"
+        selectedReviewProviderMissing={false}
+        status={status}
+        onCheckAgain={() => undefined}
+      />,
+    );
+
+    expect(document.body.textContent).toContain("Verified this launch with returned Review transcript text.");
+  });
+
+  it("does not show Review verification for a different ready provider", async () => {
+    const status: TalkCatalogReviewStatus = {
+      state: "ready",
+      label: "Review provider listed",
+      providerId: "xai",
+      detail: "xAI is listed for OpenClaw Talk transcription.",
+      providers: [{ id: "xai", label: "xAI" }],
+    };
+
+    await render(
+      <ReviewAvailabilityPanel
+        connected
+        preferredReviewProvider=""
+        reviewVoiceVerifiedAtMs={1700000000000}
+        reviewVoiceVerifiedProviderId="openai"
+        selectedReviewProviderMissing={false}
+        status={status}
+        onCheckAgain={() => undefined}
+      />,
+    );
+
+    expect(document.body.textContent).not.toContain("Verified this launch");
+    expect(document.body.textContent).toContain("Catalog is listed");
+  });
+
+  it("does not show Review verification when current catalog state needs setup", async () => {
+    const status: TalkCatalogReviewStatus = {
+      state: "needs-setup",
+      label: "Review needs Gateway setup",
+      detail: "OpenClaw Talk transcription is unavailable.",
+      providers: [],
+    };
+
+    await render(
+      <ReviewAvailabilityPanel
+        connected
+        preferredReviewProvider=""
+        reviewVoiceVerifiedAtMs={1700000000000}
+        reviewVoiceVerifiedProviderId="openai"
+        selectedReviewProviderMissing={false}
+        status={status}
+        onCheckAgain={() => undefined}
+      />,
+    );
+
+    expect(document.body.textContent).not.toContain("Verified this launch");
+    expect(document.body.textContent).toContain("Use the setup request below");
   });
 
   it("explains a saved provider that is missing from the Gateway list", async () => {
@@ -91,6 +165,7 @@ describe("ReviewAvailabilityPanel", () => {
 
     expect(document.body.textContent).toContain("Saved provider");
     expect(document.body.textContent).toContain("custom-stt");
+    expect(document.body.textContent).toContain("Use the setup request below");
     expect((document.querySelector("button") as HTMLButtonElement | null)?.disabled).toBe(false);
   });
 });

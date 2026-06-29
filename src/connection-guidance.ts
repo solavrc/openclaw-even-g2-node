@@ -30,26 +30,42 @@ function connectionHudFrameToText(frame: ConnectionHudFrame) {
   return [frame.header, "", frame.body, "", frame.hint].filter(Boolean).join("\n");
 }
 
+const OPENCLAW_AGENT_REPO_HINT = "See solavrc/openclaw-even-g2-node.";
 const REQUEST_ID_PATTERN = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
+const SAFE_REQUEST_ID_PATTERN = /^[a-z0-9][a-z0-9._:-]*$/i;
+const REQUEST_ID_PLACEHOLDER = "<requestId>";
 
-function requestIdFrom(statusText: string) {
+function looksLikeIncompleteUuid(requestId: string) {
+  return requestId.includes("-") && /^[0-9a-f-]+$/i.test(requestId) && !REQUEST_ID_PATTERN.test(requestId);
+}
+
+function concreteRequestId(requestId: string) {
+  const trimmed = requestId.trim();
+  return SAFE_REQUEST_ID_PATTERN.test(trimmed) && !looksLikeIncompleteUuid(trimmed) ? trimmed : REQUEST_ID_PLACEHOLDER;
+}
+
+function requestIdFrom(statusText: string, allowNonUuidRequestId = false) {
   const match = statusText.match(new RegExp(`requestId:\\s*(${REQUEST_ID_PATTERN.source})`, "i"))
     || statusText.match(new RegExp(`request(?:\\s+)?id[:=]\\s*(${REQUEST_ID_PATTERN.source})`, "i"));
-  return match?.[1] || "<requestId>";
+  if (match?.[1]) return match[1];
+  if (!allowNonUuidRequestId) return REQUEST_ID_PLACEHOLDER;
+  const tokenMatch = statusText.match(/requestId:\s*([a-z0-9][a-z0-9._:-]*)\s*(?:\)|$|\s)/i)
+    || statusText.match(/request(?:\s+)?id[:=]\s*([a-z0-9][a-z0-9._:-]*)\s*(?:\)|$|\s)/i);
+  return tokenMatch?.[1] ? concreteRequestId(tokenMatch[1]) : REQUEST_ID_PLACEHOLDER;
 }
 
 function hasConcreteRequestId(requestId: string) {
-  return requestId !== "<requestId>";
+  return concreteRequestId(requestId) !== REQUEST_ID_PLACEHOLDER;
 }
 
 function conversationalApprovalRequest(kind: "device" | "operator" | "node") {
-  if (kind === "node") return "Hey Claw, approve remaining Even G2 node tools.";
-  if (kind === "operator") return "Hey Claw, approve remaining Even G2 operator requests.";
-  return "Hey Claw, approve my pending Even G2 setup.";
+  if (kind === "node") return `Hey Claw, approve remaining Even G2 node tools. ${OPENCLAW_AGENT_REPO_HINT}`;
+  if (kind === "operator") return `Hey Claw, approve remaining Even G2 operator requests. ${OPENCLAW_AGENT_REPO_HINT}`;
+  return `Hey Claw, approve my pending Even G2 setup. ${OPENCLAW_AGENT_REPO_HINT}`;
 }
 
 function conversationalSetupRequest() {
-  return "Hey Claw, show my Even G2 setup QR.";
+  return `Hey Claw, show my Even G2 setup QR. ${OPENCLAW_AGENT_REPO_HINT}`;
 }
 
 function openClawAskBody(request: string) {
@@ -57,8 +73,9 @@ function openClawAskBody(request: string) {
 }
 
 function hostCommand(approveCommand: string, discoveryCommand: string, requestId: string, askPhrase: string) {
-  const approveLine = hasConcreteRequestId(requestId)
-    ? `\`$ ${approveCommand} ${requestId}\``
+  const approvedRequestId = concreteRequestId(requestId);
+  const approveLine = hasConcreteRequestId(approvedRequestId)
+    ? `\`$ ${approveCommand} ${approvedRequestId}\``
     : `Find the Even G2 request, then run \`${approveCommand} <requestId>\``;
   return [
     "Run on OpenClaw host:",
@@ -170,11 +187,11 @@ function operatorApprovalGuidance(requestId: string): ConnectionGuidance {
   };
 }
 
-export function nodeApprovalGuidance(requestId = "<requestId>"): ConnectionGuidance {
+export function nodeApprovalGuidance(): ConnectionGuidance {
   return {
     title: "Node approval required",
     body: "The device and operator are trusted. Approve the node command request so OpenClaw can use Even G2 tools like canvas and push-to-talk.",
-    action: hostCommand("openclaw nodes approve", "openclaw nodes pending", requestId, conversationalApprovalRequest("node")),
+    action: hostCommand("openclaw nodes approve", "openclaw nodes pending", REQUEST_ID_PLACEHOLDER, conversationalApprovalRequest("node")),
   };
 }
 
@@ -192,6 +209,7 @@ function originBlockGuidance(): ConnectionGuidance {
     body: "The phone reached OpenClaw, but the Gateway rejected this WebView origin.",
     action: [
       "On the OpenClaw host, add the App origin shown on this phone to gateway.controlUi.allowedOrigins.",
+      "Also confirm this phone can reach the Gateway URL through the same secure route.",
       "Then tap Retry now.",
     ].join("\n"),
   };
@@ -212,30 +230,68 @@ function authenticationPausedGuidance(statusText: string): ConnectionGuidance {
   };
 }
 
+function evenHubNetworkPermissionGuidance(): ConnectionGuidance {
+  return {
+    title: "Even Hub network permission likely blocked",
+    body: "The setup code was accepted, but the app appears blocked before the Gateway could answer.",
+    action: [
+      "Confirm the Gateway URL works from this phone outside Even Hub.",
+      "If it works there, capture Advanced diagnostics and check the Even Hub network permission for this origin.",
+      "Use a secure WSS route for non-local Gateway access.",
+    ].join("\n"),
+  };
+}
+
+function gatewayUnreachableGuidance(): ConnectionGuidance {
+  return {
+    title: "Gateway unreachable from phone",
+    body: "The setup code was accepted, but this phone could not complete the Gateway WebSocket connection.",
+    action: [
+      "Confirm the Gateway URL is reachable from this phone network.",
+      "Use a secure WSS route for remote access; plain WS should be local development only.",
+      "Check VPN/tailnet state, Gateway status, and browser/server CORS.",
+    ].join("\n"),
+  };
+}
+
 export function guidanceForConnectionState(statusText: string, hasSetupCode: boolean): ConnectionGuidance | null {
   const normalized = statusText.toLowerCase();
-  const requestId = requestIdFrom(statusText);
   if (!hasSetupCode || normalized.includes("setup code is empty")) {
     return setupConnectionGuidance();
   }
-  if (normalized.includes("higher role") || normalized.includes("role-upgrade")) {
+  if (normalized.includes("higher role") || normalized.includes("role-upgrade") || normalized.includes("role upgrade")) {
+    const requestId = requestIdFrom(statusText, true);
     return operatorApprovalGuidance(requestId);
   }
   if (normalized.includes("node") && (normalized.includes("approval") || normalized.includes("not approved") || normalized.includes("unapproved"))) {
-    return nodeApprovalGuidance(requestId);
+    return nodeApprovalGuidance();
   }
   if (normalized.includes("origin not allowed") || normalized.includes("allowedorigins")) {
     return originBlockGuidance();
   }
   if (normalized.includes("not approved yet") || normalized.includes("pairing required")) {
+    const requestId = requestIdFrom(statusText);
     return deviceApprovalGuidance(requestId);
   }
-  if (normalized.includes("websocket") || normalized.includes("network") || normalized.includes("connection error")) {
-    return {
-      title: "Gateway connection blocked",
-      body: "The setup code was accepted, but the WebSocket connection did not complete.",
-      action: "Check Even Hub network whitelist, OpenClaw allowedOrigins, and that the Gateway URL is reachable from this phone.",
-    };
+  if (
+    normalized.includes("network whitelist") ||
+    normalized.includes("network permission") ||
+    normalized.includes("manifest") ||
+    normalized.includes("app permission") ||
+    normalized.includes("permission denied") ||
+    normalized.includes("not in whitelist")
+  ) {
+    return evenHubNetworkPermissionGuidance();
+  }
+  if (
+    normalized.includes("websocket") ||
+    normalized.includes("network") ||
+    normalized.includes("connection error") ||
+    normalized.includes("failed to fetch") ||
+    normalized.includes("timed out") ||
+    normalized.includes("gateway session closed")
+  ) {
+    return gatewayUnreachableGuidance();
   }
   if (normalized.includes("too many failed authentication attempts")) {
     return authenticationPausedGuidance(statusText);

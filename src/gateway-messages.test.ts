@@ -3,6 +3,10 @@ import {
   approvalResolveAckAccepted,
   gatewayApprovalUpdate,
   gatewayErrorStatusFromMessage,
+  nodeApprovalReadySnapshot,
+  nodeApprovalRequiredFromSnapshot,
+  nodeApprovalStateApproved,
+  nodeApprovalStateExplicitlyReady,
   parseGatewayMessageData,
   parseVoiceGatewayMessageData,
   pendingApprovalResolved,
@@ -56,6 +60,57 @@ describe("gateway message parsing", () => {
     expect(approvalResolveAckAccepted({ type: "eveng2.approval.resolve.ack", status: "accepted" })).toBe(true);
     expect(approvalResolveAckAccepted({ type: "eveng2.approval.resolve.ack", status: "rejected" })).toBe(false);
     expect(gatewayErrorStatusFromMessage({ type: "error", error: "bad setup" })).toBe("error: bad setup");
+    expect(gatewayErrorStatusFromMessage({
+      type: "error",
+      error: "higher role than currently approved",
+      requestId: "6fbee43c-5f38-4c2b-b7b1-13c121edf0b5",
+    })).toBe("error: higher role than currently approved (requestId: 6fbee43c-5f38-4c2b-b7b1-13c121edf0b5)");
+  });
+
+  it("derives node approval required state from runtime node snapshots", () => {
+    expect(nodeApprovalRequiredFromSnapshot({
+      nodeId: "node-even-g2",
+      approvalState: "pending-approval",
+      pendingRequestId: "13cd37a9-2ab9-42d7-9610-1202afcf1b47",
+      openclaw: {
+        commands: ["canvas.present", "talk.ptt.once"],
+      },
+      canvas: {
+        commands: ["canvas.present"],
+      },
+    })).toEqual({
+      type: "eveng2.node.approval.required",
+      nodeId: "node-even-g2",
+      approvalState: "pending-approval",
+      commands: ["canvas.present", "talk.ptt.once"],
+    });
+    expect(nodeApprovalRequiredFromSnapshot({
+      approvalState: "approved",
+      pendingRequestId: "13cd37a9-2ab9-42d7-9610-1202afcf1b47",
+    })).toBeNull();
+  });
+
+  it("treats pendingRequestId-only runtime snapshots as node approval required", () => {
+    expect(nodeApprovalRequiredFromSnapshot({
+      nodeId: "node-even-g2",
+      pendingRequestId: "request-pending",
+      openclaw: { commands: ["talk.ptt.once"] },
+    })).toEqual({
+      type: "eveng2.node.approval.required",
+      nodeId: "node-even-g2",
+      approvalState: "pending-approval",
+      commands: ["talk.ptt.once"],
+    });
+    expect(nodeApprovalRequiredFromSnapshot({
+      nodeId: "node-even-g2",
+      approvalState: "unapproved",
+      pendingRequestId: "request-pending",
+    })).toEqual({
+      type: "eveng2.node.approval.required",
+      nodeId: "node-even-g2",
+      approvalState: "unapproved",
+      commands: [],
+    });
   });
 
   it("plans approval request, resolution, and ack updates", () => {
@@ -136,6 +191,37 @@ describe("gateway message parsing", () => {
       shouldRequestTranscript: true,
       hasNodeSnapshot: true,
       nodeSnapshot: { nodeConnected: true },
+      nodeApprovalRequired: null,
+    });
+    expect(runtimeStatusSessionUpdate({
+      type: "eveng2.runtime.status",
+      node: {
+        nodeId: "node-even-g2",
+        approvalState: "pending-approval",
+        pendingRequestId: "13cd37a9-2ab9-42d7-9610-1202afcf1b47",
+        openclaw: { commands: ["canvas.present"] },
+      },
+    }, "agent:main:main")).toMatchObject({
+      hasNodeSnapshot: true,
+      nodeApprovalRequired: {
+        type: "eveng2.node.approval.required",
+        nodeId: "node-even-g2",
+        approvalState: "pending-approval",
+        commands: ["canvas.present"],
+      },
+    });
+    expect(runtimeStatusSessionUpdate({
+      type: "eveng2.runtime.status",
+      node: {
+        nodeId: "node-even-g2",
+        pendingRequestId: "request-pending",
+      },
+    }, "agent:main:main")).toMatchObject({
+      nodeApprovalRequired: {
+        type: "eveng2.node.approval.required",
+        nodeId: "node-even-g2",
+        approvalState: "pending-approval",
+      },
     });
     expect(runtimeStatusSessionUpdate({
       type: "eveng2.runtime.status",
@@ -146,6 +232,7 @@ describe("gateway message parsing", () => {
       shouldRequestTranscript: false,
       hasNodeSnapshot: false,
       nodeSnapshot: null,
+      nodeApprovalRequired: null,
     });
     expect(runtimeStatusSessionUpdate({
       type: "eveng2.runtime.status",
@@ -156,7 +243,36 @@ describe("gateway message parsing", () => {
       shouldRequestTranscript: false,
       hasNodeSnapshot: true,
       nodeSnapshot: null,
+      nodeApprovalRequired: null,
     });
+  });
+
+  it("classifies explicit node approval states", () => {
+    expect(nodeApprovalStateApproved("approved")).toBe(true);
+    expect(nodeApprovalStateApproved("pending-approval")).toBe(false);
+    expect(nodeApprovalStateExplicitlyReady("approved")).toBe(true);
+    expect(nodeApprovalStateExplicitlyReady("ready")).toBe(true);
+    expect(nodeApprovalStateExplicitlyReady("pending-approval")).toBe(false);
+    expect(nodeApprovalStateExplicitlyReady("pending-reapproval")).toBe(false);
+    expect(nodeApprovalStateExplicitlyReady("unapproved")).toBe(false);
+    expect(nodeApprovalStateExplicitlyReady("not-approved")).toBe(false);
+    expect(nodeApprovalStateExplicitlyReady(undefined)).toBe(false);
+  });
+
+  it("clears pending node approval metadata from ready snapshots", () => {
+    const ready = nodeApprovalReadySnapshot({
+      nodeId: "node-even-g2",
+      approvalState: "pending-approval",
+      pendingRequestId: "13cd37a9-2ab9-42d7-9610-1202afcf1b47",
+      openclaw: { commands: ["canvas.present"] },
+    });
+
+    expect(ready).toEqual({
+      nodeId: "node-even-g2",
+      approvalState: "approved",
+      openclaw: { commands: ["canvas.present"] },
+    });
+    expect(nodeApprovalRequiredFromSnapshot(ready)).toBeNull();
   });
 
   it("plans session config and switch updates", () => {

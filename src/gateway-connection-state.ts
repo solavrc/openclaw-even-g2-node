@@ -13,14 +13,12 @@ export function gatewayErrorStatus(currentStatus: string) {
   return currentStatus.startsWith("error:") ? currentStatus : "connection error";
 }
 
-export function nodeApprovalRequiredStatus(requestId: string | undefined) {
-  return requestId
-    ? `node approval required (requestId: ${requestId})`
-    : "node approval required";
+export function nodeApprovalRequiredStatus() {
+  return "node approval required";
 }
 
 export function shouldRestoreReadyAfterNodeApproval(status: string) {
-  return status === "node approval required" || status.startsWith("node approval required ");
+  return status === "node approval required" || status.startsWith("node approval required");
 }
 
 export function shouldCloseGatewayTransport(readyState: number, closingState: number) {

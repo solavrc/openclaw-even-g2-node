@@ -34,7 +34,7 @@ afterEach(async () => {
 });
 
 describe("NodeLiveStatusPanel", () => {
-  it("renders live facts, guidance, recovery, and invokes the live action", async () => {
+  it("renders readiness, guidance, recovery, and invokes the live action", async () => {
     const onLiveAction = vi.fn();
     await render(
       <NodeLiveStatusPanel
@@ -49,28 +49,75 @@ describe("NodeLiveStatusPanel", () => {
             "\"Hey Claw, show my Even G2 setup QR.\"",
           ].join("\n"),
         }}
-        connectionState="Disconnected"
         liveActionLabel="Scan setup QR"
-        liveFacts={["Gateway offline", "scan setup QR"]}
         liveStateLabel="Setup required"
         originNotAllowed
+        readinessItems={[{
+          label: "Gateway setup",
+          status: "Needed",
+          detail: "Scan the OpenClaw setup QR from this phone.",
+          tone: "pending",
+        }]}
         setupScanStatus="Setup code missing."
-        status="setup required"
         voiceFailureActionText="Check Gateway voice setup."
         voiceFailureErrorText="provider failed"
         voiceFailureTitleText="Voice setup needed"
-        voiceStatusLabel="voice setup after pairing"
         onLiveAction={onLiveAction}
       />,
     );
 
     const panel = document.querySelector('[aria-label="Node live status"]');
     expect(panel?.textContent).toContain("Setup required");
-    expect(panel?.textContent).toContain("Gateway offline");
+    expect(panel?.textContent).toContain("Readiness");
+    expect(panel?.textContent).toContain("Gateway setup");
     expect(panel?.textContent).toContain("Set up OpenClaw Gateway");
     expect(panel?.textContent).toContain("Hey Claw, show my Even G2 setup QR.");
     expect(panel?.textContent).toContain("Allow this App origin in OpenClaw.");
     expect(panel?.textContent).toContain("provider failed");
+
+    await act(async () => {
+      (panel?.querySelector("button") as HTMLButtonElement).click();
+    });
+
+    expect(onLiveAction).toHaveBeenCalledOnce();
+  });
+
+  it("keeps node approval pending visible with a manual refresh action", async () => {
+    const onLiveAction = vi.fn();
+    await render(
+      <NodeLiveStatusPanel
+        appOrigin="http://localhost:5173"
+        connectionGuidance={{
+          title: "Node approval required",
+          body: "Approve the Even G2 node command request.",
+          action: [
+            "Run on OpenClaw host:",
+            "`$ openclaw nodes pending`",
+            "Find the Even G2 request, then run `openclaw nodes approve <requestId>`",
+          ].join("\n"),
+        }}
+        liveActionLabel="Check again"
+        liveStateLabel="Node approval required"
+        originNotAllowed={false}
+        readinessItems={[{
+          label: "Node tools approval",
+          status: "Pending",
+          detail: "Approve Even G2 node tools so canvas and push-to-talk can run.",
+          tone: "attention",
+        }]}
+        setupScanStatus=""
+        voiceFailureActionText=""
+        voiceFailureErrorText=""
+        voiceFailureTitleText=""
+        onLiveAction={onLiveAction}
+      />,
+    );
+
+    const panel = document.querySelector('[aria-label="Node live status"]');
+    expect(panel?.textContent).toContain("Node approval required");
+    expect(panel?.textContent).toContain("Node tools approval");
+    expect(panel?.textContent).toContain("Check again");
+    expect(panel?.textContent).toContain("openclaw nodes pending");
 
     await act(async () => {
       (panel?.querySelector("button") as HTMLButtonElement).click();
@@ -121,7 +168,6 @@ describe("DiagnosticsPanel", () => {
       nodeApprovalState: "",
       nodeDetail: "",
       nodeId: "",
-      nodePendingRequestId: "",
       nodeStatusLabel: "Not paired",
       sessionKey: "",
       voiceModeLabelText: "Review",
@@ -144,7 +190,6 @@ describe("DiagnosticsPanel", () => {
       nodeApprovalState: "approved",
       nodeDetail: "Session: Main",
       nodeId: "node-1",
-      nodePendingRequestId: "request-1",
       nodeStatusLabel: "Paired",
       sessionKey: "",
       voiceModeLabelText: "Review",
@@ -161,7 +206,6 @@ describe("DiagnosticsPanel", () => {
       nodeApprovalState: "approved",
       nodeDetail: "Session: Main",
       nodeId: "node-1",
-      nodePendingRequestId: "request-1",
       nodeStatusLabel: "Paired",
       sessionKey: "",
       voiceModeLabelText: "Review",
@@ -169,7 +213,6 @@ describe("DiagnosticsPanel", () => {
       { label: "Device ID", value: "device-1" },
       { label: "Node ID", value: "node-1" },
       { label: "Node approval", value: "approved" },
-      { label: "Node request", value: "request-1" },
     ]));
   });
 
@@ -195,7 +238,6 @@ describe("DiagnosticsPanel", () => {
         nodeApprovalState="approved"
         nodeDetail="Session: Main"
         nodeId="node-1"
-        nodePendingRequestId="request-1"
         nodeStatusLabel="Paired · G2 bridge live"
         sessionKey="agent:main:main"
         sessionTranscriptError=""

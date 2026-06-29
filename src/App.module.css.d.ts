@@ -14,7 +14,6 @@ declare const styles: {
   readonly "empty-state": string;
   readonly "event-log": string;
   readonly "event-log-line": string;
-  readonly "fact-row": string;
   readonly field: string;
   readonly "field-help": string;
   readonly "gateway-hint": string;
@@ -37,7 +36,6 @@ declare const styles: {
   readonly "manual-setup": string;
   readonly "node-live": string;
   readonly "node-live-main": string;
-  readonly "node-status-line": string;
   readonly "node-summary": string;
   readonly "pairing-detail": string;
   readonly "pairing-zone": string;
@@ -45,6 +43,14 @@ declare const styles: {
   readonly "preview-status": string;
   readonly "primary-action": string;
   readonly "provider-select": string;
+  readonly "readiness-checklist": string;
+  readonly "readiness-item": string;
+  readonly "readiness-item-attention": string;
+  readonly "readiness-item-blocked": string;
+  readonly "readiness-item-optional": string;
+  readonly "readiness-item-pending": string;
+  readonly "readiness-item-ready": string;
+  readonly "readiness-list": string;
   readonly "recovery-note": string;
   readonly "reference-link": string;
   readonly "review-availability": string;

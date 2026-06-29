@@ -1,11 +1,20 @@
 import type { ConnectionGuidance } from "./connection-guidance";
 import { ConnectionGuidanceAction } from "./connection-guidance-view";
 import type { EvenHubEventLog } from "./even-hub-diagnostics";
+import type { ReadinessChecklistItem, ReadinessTone } from "./phone-ui-state";
 import styles from "./App.module.css";
 
 function cx(...classes: Array<string | false | null | undefined>) {
   return classes.filter(Boolean).join(" ");
 }
+
+const READINESS_TONE_CLASS: Record<ReadinessTone, string> = {
+  attention: styles["readiness-item-attention"],
+  blocked: styles["readiness-item-blocked"],
+  optional: styles["readiness-item-optional"],
+  pending: styles["readiness-item-pending"],
+  ready: styles["readiness-item-ready"],
+};
 
 export type DiagnosticRowInput = {
   activeSessionLabel: string;
@@ -19,7 +28,6 @@ export type DiagnosticRowInput = {
   nodeApprovalState: string;
   nodeDetail: string;
   nodeId: string;
-  nodePendingRequestId: string;
   nodeStatusLabel: string;
   sessionKey: string;
   voiceModeLabelText: string;
@@ -35,7 +43,6 @@ export function diagnosticRows(input: DiagnosticRowInput) {
       ...(input.deviceId ? [{ label: "Device ID", value: input.deviceId }] : []),
       ...(input.nodeId ? [{ label: "Node ID", value: input.nodeId }] : []),
       ...(input.nodeApprovalState ? [{ label: "Node approval", value: input.nodeApprovalState }] : []),
-      ...(input.nodePendingRequestId ? [{ label: "Node request", value: input.nodePendingRequestId }] : []),
       { label: "Session", value: input.activeSessionLabel },
       { label: "Session key", value: input.sessionKey || "Resolving" },
       { label: "View", value: input.glassView },
@@ -93,35 +100,49 @@ function ConnectionGuidanceNote({ guidance }: { guidance: ConnectionGuidance }) 
   );
 }
 
+function ReadinessChecklist({ items }: { items: ReadinessChecklistItem[] }) {
+  if (!items.length) return null;
+  return (
+    <section className={styles["readiness-checklist"]} aria-label="Readiness checklist">
+      <div className={styles["section-label"]}>Readiness</div>
+      <div className={styles["readiness-list"]}>
+        {items.map((item) => (
+          <div className={cx(styles["readiness-item"], READINESS_TONE_CLASS[item.tone])} key={item.label}>
+            <div>
+              <span>{item.label}</span>
+              <strong>{item.status}</strong>
+            </div>
+            <p>{item.detail}</p>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
 export function NodeLiveStatusPanel({
   appOrigin,
   connectionGuidance,
-  connectionState,
   liveActionLabel,
-  liveFacts,
   liveStateLabel,
   originNotAllowed,
+  readinessItems,
   setupScanStatus,
-  status,
   voiceFailureActionText,
   voiceFailureErrorText,
   voiceFailureTitleText,
-  voiceStatusLabel,
   onLiveAction,
 }: {
   appOrigin: string;
   connectionGuidance: ConnectionGuidance | null;
-  connectionState: string;
   liveActionLabel: string;
-  liveFacts: string[];
   liveStateLabel: string;
   originNotAllowed: boolean;
+  readinessItems: ReadinessChecklistItem[];
   setupScanStatus: string;
-  status: string;
   voiceFailureActionText: string;
   voiceFailureErrorText: string;
   voiceFailureTitleText: string;
-  voiceStatusLabel: string;
   onLiveAction: () => void;
 }) {
   return (
@@ -142,10 +163,7 @@ export function NodeLiveStatusPanel({
           </button>
         ) : null}
       </div>
-      <div className={styles["fact-row"]} aria-label="Node facts">
-        {liveFacts.map((fact) => <span key={fact}>{fact}</span>)}
-      </div>
-      <div className={styles["node-status-line"]}>{connectionState} · {status} · {voiceStatusLabel}</div>
+      <ReadinessChecklist items={readinessItems} />
       {connectionGuidance ? <ConnectionGuidanceNote guidance={connectionGuidance} /> : null}
       {setupScanStatus ? <div className={styles["preview-status"]}>{setupScanStatus}</div> : null}
       {originNotAllowed ? <OriginRecoveryNote appOrigin={appOrigin} /> : null}
@@ -254,7 +272,6 @@ export function DiagnosticsPanel({
   nodeApprovalState,
   nodeDetail,
   nodeId,
-  nodePendingRequestId,
   nodeStatusLabel,
   sessionKey,
   sessionTranscriptError,
@@ -274,7 +291,6 @@ export function DiagnosticsPanel({
   nodeApprovalState: string;
   nodeDetail: string;
   nodeId: string;
-  nodePendingRequestId: string;
   nodeStatusLabel: string;
   sessionKey: string;
   sessionTranscriptError: string;
@@ -293,7 +309,6 @@ export function DiagnosticsPanel({
     nodeApprovalState,
     nodeDetail,
     nodeId,
-    nodePendingRequestId,
     nodeStatusLabel,
     sessionKey,
     voiceModeLabelText,
