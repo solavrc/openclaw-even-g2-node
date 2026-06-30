@@ -263,12 +263,20 @@ export function guidanceForConnectionState(statusText: string, hasSetupCode: boo
   if (normalized.includes("node") && (normalized.includes("approval") || normalized.includes("not approved") || normalized.includes("unapproved"))) {
     return nodeApprovalGuidance();
   }
+  if (normalized.includes("device") && normalized.includes("approval")) {
+    const requestId = requestIdFrom(statusText);
+    return deviceApprovalGuidance(requestId);
+  }
   if (normalized.includes("origin not allowed") || normalized.includes("allowedorigins")) {
     return originBlockGuidance();
   }
   if (normalized.includes("not approved yet") || normalized.includes("pairing required")) {
     const requestId = requestIdFrom(statusText);
     return deviceApprovalGuidance(requestId);
+  }
+  if (normalized.includes("approval_required") || normalized.includes("approval required")) {
+    const requestId = requestIdFrom(statusText, true);
+    return operatorApprovalGuidance(requestId);
   }
   if (
     normalized.includes("network whitelist") ||

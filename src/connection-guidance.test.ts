@@ -37,6 +37,15 @@ describe("guidanceForConnectionState", () => {
     expect(guidance?.action).toContain("Hey Claw, approve remaining Even G2 operator requests.");
   });
 
+  it("treats generic approval-required errors as operator approval", () => {
+    const underscored = guidanceForConnectionState("error: approval_required", true);
+    const spaced = guidanceForConnectionState("error: approval required (requestId: request-1)", true);
+
+    expect(underscored?.title).toBe("Operator approval required");
+    expect(spaced?.title).toBe("Operator approval required");
+    expect(spaced?.action).toContain("$ openclaw devices approve request-1");
+  });
+
   it("renders safe non-UUID operator approval request ids as host commands", () => {
     const guidance = guidanceForConnectionState("error: role upgrade required (requestId: request-1)", true);
 
@@ -102,6 +111,21 @@ describe("connectionErrorPresentationPlan", () => {
 
     expect(shouldRetryWhileAwaitingApproval(approvalPlan)).toBe(true);
     expect(shouldRetryWhileAwaitingApproval(authPausePlan)).toBe(false);
+  });
+
+  it("allows automatic retry for generic approval-required pauses", () => {
+    const plan = connectionErrorPresentationPlan(
+      "error: approval_required",
+      "approval_required",
+      true,
+    );
+
+    expect(plan).toMatchObject({
+      target: "guidance",
+      guidance: { title: "Operator approval required" },
+      reconnectReason: "needs attention",
+    });
+    expect(shouldRetryWhileAwaitingApproval(plan)).toBe(true);
   });
 
   it("falls back to a glass error frame when no guidance matches", () => {
