@@ -2439,7 +2439,7 @@ describe("Gateway direct voice", () => {
 
     await vi.waitFor(() => expect(messages.some((message) => message.type === "voice.draft.ready")).toBe(true), { timeout: 4000 });
     expect(messages).toContainEqual({
-      type: "transcript.final",
+      type: "transcript.partial",
       text: "令和七年七月一日の報告書を作成しました。",
       sessionKey: "agent:main:main",
       targetSessionKey: "agent:main:main",
@@ -2453,7 +2453,7 @@ describe("Gateway direct voice", () => {
       idempotencyKey: "voice-talk-multi-final",
     });
     expect(messages).toContainEqual({
-      type: "transcript.final",
+      type: "transcript.partial",
       text: "令和七年七月一日の報告書を作成しました。 請求金額は税込み百二十三万四千五百六十七円です。",
       sessionKey: "agent:main:main",
       targetSessionKey: "agent:main:main",
@@ -2505,8 +2505,54 @@ describe("Gateway direct voice", () => {
     });
 
     expect(messages.at(-1)).toMatchObject({
-      type: "transcript.final",
+      type: "transcript.partial",
       text: "東京都渋谷区の報告書です。 請求金額は百二十三万円です。",
+    });
+  });
+
+  it("replaces Talk transcript corrections with nested transcript ids", () => {
+    const voice = new GatewayDirectVoiceTransport({
+      gateway: {} as never,
+      config: {
+        transcriptionMode: "talk-relay",
+        sessionKey: "agent:main:main",
+        targetSessionKey: "agent:main:main",
+        idempotencyKey: "voice-talk-nested-transcript-id",
+        format: {
+          encoding: "pcm_s16le",
+          sampleRateHz: 16000,
+          channels: 1,
+        },
+      },
+      getSessionKey: () => "agent:main:main",
+      request: async () => ({}),
+      onClose: () => undefined,
+    });
+    const messages: Array<Record<string, unknown>> = [];
+    voice.addEventListener("message", (event) => {
+      messages.push(JSON.parse((event as MessageEvent).data as string) as Record<string, unknown>);
+    });
+
+    voice.handleTalkEvent({
+      type: "transcript.done",
+      sessionId: "talk-nested-transcript-1",
+      transcript: {
+        id: "transcript-1",
+        text: "東京都渋谷区の報告書です。",
+      },
+    });
+    voice.handleTalkEvent({
+      type: "transcript.done",
+      sessionId: "talk-nested-transcript-1",
+      transcript: {
+        id: "transcript-1",
+        text: "東京都渋谷区の技術検証報告書です。",
+      },
+    });
+
+    expect(messages.at(-1)).toMatchObject({
+      type: "transcript.partial",
+      text: "東京都渋谷区の技術検証報告書です。",
     });
   });
 
@@ -2537,7 +2583,7 @@ describe("Gateway direct voice", () => {
     voice.handleTalkEvent({ type: "transcript.done", sessionId: "talk-repeat-1", text: "はい" });
 
     expect(messages.at(-1)).toMatchObject({
-      type: "transcript.final",
+      type: "transcript.partial",
       text: "はい はい",
     });
   });
@@ -2569,8 +2615,101 @@ describe("Gateway direct voice", () => {
     voice.handleTalkEvent({ type: "transcript.done", sessionId: "talk-prefix-1", text: "はい、お願いします" });
 
     expect(messages.at(-1)).toMatchObject({
-      type: "transcript.final",
+      type: "transcript.partial",
       text: "はい はい、お願いします",
+    });
+  });
+
+  it("keeps finalized text when partial timeout fallback shares its prefix", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(6000);
+    const voice = new GatewayDirectVoiceTransport({
+      gateway: {} as never,
+      config: {
+        transcriptionMode: "talk-relay",
+        sessionKey: "agent:main:main",
+        targetSessionKey: "agent:main:main",
+        idempotencyKey: "voice-talk-partial-prefix-timeout",
+        draftTimeoutMs: 3000,
+        format: {
+          encoding: "pcm_s16le",
+          sampleRateHz: 16000,
+          channels: 1,
+        },
+      },
+      getSessionKey: () => "agent:main:main",
+      request: async () => ({}),
+      onClose: () => undefined,
+    });
+    const addTalkFinalSegment = Reflect.get(voice, "addTalkFinalSegment");
+    const waitForTalkFinalText = Reflect.get(voice, "waitForTalkFinalText");
+    if (typeof addTalkFinalSegment !== "function" || typeof waitForTalkFinalText !== "function") {
+      throw new Error("GatewayDirectVoiceTransport Talk helpers are unavailable");
+    }
+    addTalkFinalSegment.call(voice, "はい");
+    Reflect.set(voice, "talkPartialText", "はい、お願いします");
+    Reflect.set(voice, "talkLastTranscriptEventAtMs", Date.now());
+
+    const waitPromise = waitForTalkFinalText.call(voice) as Promise<string>;
+    await vi.advanceTimersByTimeAsync(3200);
+
+    await expect(waitPromise).resolves.toBe("はい はい、お願いします");
+  });
+
+  it("defers node command transcript finals until Talk relay drain completes", async () => {
+    const calls: Array<{ method: string; params?: Record<string, unknown> }> = [];
+    const voice = new GatewayDirectVoiceTransport({
+      gateway: {} as never,
+      config: {
+        transcriptionMode: "talk-relay",
+        sessionKey: "agent:main:main",
+        idempotencyKey: "voice-talk-node-drain",
+        draftTimeoutMs: 3000,
+        format: {
+          encoding: "pcm_s16le",
+          sampleRateHz: 16000,
+          channels: 1,
+        },
+      },
+      getSessionKey: () => "agent:main:main",
+      request: async (method, params) => {
+        calls.push({ method, params: params as Record<string, unknown> });
+        if (method === "talk.session.create") return { sessionId: "talk-node-drain-1" };
+        return {};
+      },
+      onClose: () => undefined,
+    });
+    const messages: Array<Record<string, unknown>> = [];
+    voice.addEventListener("message", (event) => {
+      messages.push(JSON.parse((event as MessageEvent).data as string) as Record<string, unknown>);
+    });
+
+    const openPromise = voice.open();
+    await vi.waitFor(() => expect(calls.some((call) => call.method === "talk.session.create")).toBe(true));
+    voice.handleTalkEvent({ type: "ready", transcriptionSessionId: "talk-node-drain-1" });
+    await openPromise;
+    voice.handleTalkEvent({
+      type: "transcript.done",
+      sessionId: "talk-node-drain-1",
+      turnId: "turn-1",
+      text: "令和七年七月一日。",
+    });
+    voice.handleTalkEvent({
+      type: "transcript.done",
+      sessionId: "talk-node-drain-1",
+      turnId: "turn-2",
+      text: "技術検証報告書です。",
+    });
+    expect(messages.some((message) => message.type === "transcript.final")).toBe(false);
+
+    voice.send(JSON.stringify({ type: "utterance.finalize" }));
+
+    await vi.waitFor(() => expect(messages.some((message) => message.type === "transcript.final")).toBe(true), { timeout: 4000 });
+    expect(messages).toContainEqual({
+      type: "transcript.final",
+      text: "令和七年七月一日。 技術検証報告書です。",
+      sessionKey: "agent:main:main",
+      idempotencyKey: "voice-talk-node-drain",
     });
   });
 

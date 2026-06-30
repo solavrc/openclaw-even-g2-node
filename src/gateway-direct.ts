@@ -1832,7 +1832,7 @@ export class GatewayDirectVoiceTransport extends EventTarget {
       this.talkPartialText = "";
       this.addTalkFinalSegment(text, talkTranscriptSegmentKey(candidates));
       this.emit({
-        type: "transcript.final",
+        type: "transcript.partial",
         text: this.combinedTalkTranscript(),
         sessionKey: this.options.config.sessionKey || this.options.getSessionKey(),
         targetSessionKey: this.options.config.targetSessionKey,
@@ -2091,8 +2091,6 @@ export class GatewayDirectVoiceTransport extends EventTarget {
     const partial = this.talkPartialText.trim();
     if (!partial) return finalized;
     if (!finalized) return partial;
-    if (partial === finalized || finalized.endsWith(partial)) return finalized;
-    if (partial.startsWith(finalized)) return partial;
     return `${finalized} ${partial}`;
   }
 
@@ -2229,6 +2227,17 @@ function talkTranscriptSegmentKey(candidates: Record<string, unknown>[]) {
     const segment = asObject(candidate.segment);
     const segmentId = segment ? asString(segment.id) || asString(segment.segmentId) || asString(segment.segment_id) : "";
     if (segmentId) return segmentId;
+    const transcript = asObject(candidate.transcript);
+    const transcriptId = transcript
+      ? asString(transcript.id)
+        || asString(transcript.transcriptId)
+        || asString(transcript.transcript_id)
+        || asString(transcript.segmentId)
+        || asString(transcript.segment_id)
+        || asString(transcript.itemId)
+        || asString(transcript.item_id)
+      : "";
+    if (transcriptId) return transcriptId;
   }
   return "";
 }
