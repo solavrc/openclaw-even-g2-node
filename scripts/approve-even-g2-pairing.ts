@@ -1,4 +1,5 @@
 import { execFileSync } from "node:child_process";
+import fs from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { redactText } from "./e2e-agent-review.ts";
@@ -8,6 +9,7 @@ type JsonRecord = Record<string, unknown>;
 type ParsedArgs = {
   allowNonEvenG2: boolean;
   dryRun: boolean;
+  e2eIsolatedStateDir: string;
   openclawArgs: string[];
   openclawGlobalArgs: string[];
   pollMs: number;
@@ -41,6 +43,14 @@ type PendingRequest = {
 const DEFAULT_WATCH_MS = 30_000;
 const DEFAULT_POLL_MS = 750;
 const DEFAULT_SETTLE_MS = 8_000;
+const ISOLATED_E2E_ADMIN_SCOPES = [
+  "operator.admin",
+  "operator.approvals",
+  "operator.pairing",
+  "operator.read",
+  "operator.talk.secrets",
+  "operator.write",
+];
 const EVEN_G2_NODE_CAPS = new Set(["canvas", "talk"]);
 const EVEN_G2_NODE_COMMANDS = new Set([
   "canvas.hide",
@@ -73,6 +83,10 @@ Options handled by this wrapper:
                         Run OpenClaw CLI calls through this container.
   --openclaw-profile <name>
                         Run OpenClaw CLI calls with this profile.
+  --e2e-isolated-state-dir <path>
+                        Disposable isolated Gateway state dir. Grants the
+                        generated CLI identity the admin/operator scopes needed
+                        to approve setup requests. Do not use with real state.
   --allow-non-even-g2   Allow approving a newest device request that does not look like Even G2.
   -h, --help            Show this help.
 
@@ -95,6 +109,97 @@ function readStringArray(value: unknown): string[] | undefined {
   return values.length ? values : undefined;
 }
 
+function uniqueScopeArray(value: unknown, scopes: string[]) {
+  const next = new Set(readStringArray(value) || []);
+  const before = next.size;
+  for (const scope of scopes) next.add(scope);
+  return { changed: next.size !== before, value: [...next].sort() };
+}
+
+function cliRecordLooksPatchable(record: JsonRecord) {
+  const clientId = readString(record.clientId)?.toLowerCase();
+  const clientMode = readString(record.clientMode)?.toLowerCase();
+  const platform = readString(record.platform)?.toLowerCase();
+  const tokens = asRecord(record.tokens);
+  return clientId === "cli"
+    || clientMode === "cli"
+    || (platform === "linux" && Boolean(tokens?.operator));
+}
+
+function addScopesToTokenState(tokens: unknown, scopes: string[]) {
+  let changed = false;
+  if (Array.isArray(tokens)) {
+    for (const token of tokens) {
+      const record = asRecord(token);
+      if (!record || readString(record.role) !== "operator") continue;
+      const next = uniqueScopeArray(record.scopes, scopes);
+      record.scopes = next.value;
+      changed = changed || next.changed;
+    }
+    return changed;
+  }
+  const tokenRecord = asRecord(tokens);
+  const operator = asRecord(tokenRecord?.operator);
+  if (!operator) return false;
+  const next = uniqueScopeArray(operator.scopes, scopes);
+  operator.scopes = next.value;
+  return next.changed;
+}
+
+function isCliPendingRequest(record: JsonRecord) {
+  return readString(record.clientId)?.toLowerCase() === "cli"
+    || readString(record.clientMode)?.toLowerCase() === "cli";
+}
+
+export function grantIsolatedE2eCliAdmin(stateDir: string, scopes = ISOLATED_E2E_ADMIN_SCOPES) {
+  const pairedPath = path.join(stateDir, "devices", "paired.json");
+  if (!fs.existsSync(pairedPath)) return { ok: false, reason: "paired state missing", changed: false, removedPending: 0 };
+  const paired = asRecord(JSON.parse(fs.readFileSync(pairedPath, "utf8")));
+  if (!paired) return { ok: false, reason: "paired state is not an object", changed: false, removedPending: 0 };
+
+  const cliEntry = Object.entries(paired).find(([, value]) => {
+    const record = asRecord(value);
+    return record ? cliRecordLooksPatchable(record) : false;
+  });
+  if (!cliEntry) return { ok: false, reason: "CLI device not found", changed: false, removedPending: 0 };
+
+  const [deviceId, device] = cliEntry;
+  const record = asRecord(device);
+  if (!record) return { ok: false, reason: "CLI device state is not an object", changed: false, removedPending: 0 };
+
+  let changed = false;
+  for (const key of ["scopes", "approvedScopes"] as const) {
+    const next = uniqueScopeArray(record[key], scopes);
+    record[key] = next.value;
+    changed = changed || next.changed;
+  }
+  changed = addScopesToTokenState(record.tokens, scopes) || changed;
+  if (changed) fs.writeFileSync(pairedPath, `${JSON.stringify(paired, null, 2)}\n`);
+
+  const pendingPath = path.join(stateDir, "devices", "pending.json");
+  let removedPending = 0;
+  if (fs.existsSync(pendingPath)) {
+    const pending = asRecord(JSON.parse(fs.readFileSync(pendingPath, "utf8")));
+    if (pending) {
+      for (const [requestId, request] of Object.entries(pending)) {
+        const pendingRecord = asRecord(request);
+        if (!pendingRecord || !isCliPendingRequest(pendingRecord)) continue;
+        delete pending[requestId];
+        removedPending += 1;
+      }
+      if (removedPending > 0) fs.writeFileSync(pendingPath, `${JSON.stringify(pending, null, 2)}\n`);
+    }
+  }
+
+  return {
+    ok: true,
+    changed,
+    deviceId,
+    removedPending,
+    scopes,
+  };
+}
+
 function readNumber(value: string, flag: string): number {
   const parsed = Number(value);
   if (!Number.isFinite(parsed) || parsed < 0) throw new Error(`${flag} must be a non-negative number.`);
@@ -106,6 +211,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
   const openclawGlobalArgs: string[] = [];
   let allowNonEvenG2 = false;
   let dryRun = false;
+  let e2eIsolatedStateDir = "";
   let watchMs: number | null = null;
   let pollMs = DEFAULT_POLL_MS;
   let settleMs = DEFAULT_SETTLE_MS;
@@ -117,6 +223,11 @@ export function parseArgs(argv: string[]): ParsedArgs {
       allowNonEvenG2 = true;
     } else if (arg === "--dry-run") {
       dryRun = true;
+    } else if (arg === "--e2e-isolated-state-dir") {
+      const value = argv[index + 1];
+      if (!value) throw new Error("--e2e-isolated-state-dir requires a value.");
+      e2eIsolatedStateDir = path.resolve(value);
+      index += 1;
     } else if (arg === "--watch-ms") {
       const value = argv[index + 1];
       if (!value) throw new Error("--watch-ms requires a value.");
@@ -153,7 +264,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
       openclawArgs.push(arg);
     }
   }
-  return { allowNonEvenG2, dryRun, openclawArgs, openclawGlobalArgs, pollMs, settleMs, watchMs };
+  return { allowNonEvenG2, dryRun, e2eIsolatedStateDir, openclawArgs, openclawGlobalArgs, pollMs, settleMs, watchMs };
 }
 
 function runOpenClaw(openclawGlobalArgs: string[], commandArgs: string[], allowExitOne = false): CommandResult {
@@ -407,6 +518,11 @@ function approveRequest(request: PendingRequest, openclawGlobalArgs: string[], o
   }
 }
 
+function approvalNeedsIsolatedAdmin(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error);
+  return /operator\.admin|role-management-requires-admin|device pairing approval denied|missing scope|scope upgrade pending approval|asking for more scopes/i.test(message);
+}
+
 function actionLine(request: PendingRequest, dryRun: boolean): string {
   const command = `openclaw ${request.kind === "device" ? "devices" : "nodes"} approve ${request.requestId}`;
   return `${dryRun ? "[dry-run]" : "[approve]"} ${formatRequest(request)}\n  ${command}`;
@@ -433,9 +549,27 @@ export function approveEvenG2Pairing(argv = process.argv.slice(2)): void {
   let printedCount = 0;
   let blockedByOtherDevice = false;
   let lastActivityAt: number | null = null;
+  let isolatedAdminGranted = false;
+  let isolatedAdminWarningPrinted = false;
+
+  const maybeGrantIsolatedAdmin = () => {
+    if (!args.e2eIsolatedStateDir || isolatedAdminGranted) return false;
+    const result = grantIsolatedE2eCliAdmin(args.e2eIsolatedStateDir);
+    if (result.ok) {
+      isolatedAdminGranted = true;
+      console.log(`[isolated-e2e] CLI admin scopes ready for ${String(result.deviceId).slice(0, 12)}; removedPending=${result.removedPending}`);
+      return true;
+    }
+    if (!isolatedAdminWarningPrinted) {
+      isolatedAdminWarningPrinted = true;
+      console.log(`[isolated-e2e] CLI admin scopes not ready yet: ${result.reason}`);
+    }
+    return false;
+  };
 
   console.log(args.dryRun ? "Previewing Even G2 pairing approvals." : "Approving Even G2 pairing approvals.");
   if (!args.dryRun && watchMs > 0) console.log(`Watching for ${watchMs}ms.`);
+  if (!args.dryRun) maybeGrantIsolatedAdmin();
 
   do {
     let sawNewEvenG2Request = false;
@@ -447,7 +581,13 @@ export function approveEvenG2Pairing(argv = process.argv.slice(2)): void {
         console.log(actionLine(device, args.dryRun));
         printedCount += 1;
         if (!args.dryRun) {
-          const result = approveRequest(device, args.openclawGlobalArgs, args.openclawArgs);
+          let result: "approved" | "stale";
+          try {
+            result = approveRequest(device, args.openclawGlobalArgs, args.openclawArgs);
+          } catch (error) {
+            if (!args.e2eIsolatedStateDir || !approvalNeedsIsolatedAdmin(error) || !maybeGrantIsolatedAdmin()) throw error;
+            result = approveRequest(device, args.openclawGlobalArgs, args.openclawArgs);
+          }
           if (result === "approved") approvedCount += 1;
           else {
             staleCount += 1;
@@ -472,7 +612,13 @@ export function approveEvenG2Pairing(argv = process.argv.slice(2)): void {
       console.log(actionLine(node, args.dryRun));
       printedCount += 1;
       if (!args.dryRun) {
-        const result = approveRequest(node, args.openclawGlobalArgs, args.openclawArgs);
+        let result: "approved" | "stale";
+        try {
+          result = approveRequest(node, args.openclawGlobalArgs, args.openclawArgs);
+        } catch (error) {
+          if (!args.e2eIsolatedStateDir || !approvalNeedsIsolatedAdmin(error) || !maybeGrantIsolatedAdmin()) throw error;
+          result = approveRequest(node, args.openclawGlobalArgs, args.openclawArgs);
+        }
         if (result === "approved") approvedCount += 1;
         else {
           staleCount += 1;

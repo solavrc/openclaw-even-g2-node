@@ -44,6 +44,7 @@
     "sim:fixtures": "tsx scripts/evenhub-simulator-fixtures.ts",
     "e2e:agent": "tsx scripts/e2e-agent-review.ts",
     "e2e:agent:live": "tsx scripts/e2e-agent-review.ts --openclaw-live-canvas",
+    "e2e:agent:onboarding": "tsx scripts/e2e-agent-onboarding-smoke.ts",
     "e2e:agent:review:validate": "tsx scripts/validate-llm-review.ts",
     "e2e:gateway:plan": "tsx scripts/isolated-openclaw-gateway.ts plan",
     "e2e:gateway:start": "tsx scripts/isolated-openclaw-gateway.ts start",

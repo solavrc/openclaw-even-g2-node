@@ -143,7 +143,44 @@ describe("isolated OpenClaw Gateway config", () => {
           xai: {
             enabled: true,
           },
+          codex: {
+            enabled: true,
+          },
         },
+      },
+      agents: {
+        defaults: {
+          workspace: "/home/node/.openclaw/workspace",
+          model: {
+            primary: "openai/gpt-5.5",
+            fallbacks: [],
+          },
+          models: {
+            "openai/gpt-5.5": {
+              agentRuntime: {
+                id: "codex",
+              },
+            },
+          },
+        },
+        list: [
+          {
+            id: "main",
+            default: true,
+            workspace: "/home/node/.openclaw/workspace",
+            model: {
+              primary: "openai/gpt-5.5",
+              fallbacks: [],
+            },
+            models: {
+              "openai/gpt-5.5": {
+                agentRuntime: {
+                  id: "codex",
+                },
+              },
+            },
+          },
+        ],
       },
       tools: {
         media: {
@@ -161,6 +198,7 @@ describe("isolated OpenClaw Gateway config", () => {
       },
     });
     expect(Object.keys(config)).not.toContain("auth");
+    expect(config.plugins.entries?.openai).toBeUndefined();
   });
 
   it("keeps full E2E plugin entries when adding an allowlist", () => {
@@ -220,16 +258,18 @@ describe("isolated OpenClaw Gateway Docker plan", () => {
     expect(plan.dockerRunArgs).toContain("--rm");
     expect(plan.configTemplatePath).toBe(FULL_E2E_GATEWAY_CONFIG_TEMPLATE_PATH);
     expect(plan.config.plugins.entries?.["voice-call"]).toMatchObject({ enabled: true });
-    expect(plan.installPluginPackages).toEqual(["@openclaw/voice-call"]);
+    expect(plan.installPluginPackages).toEqual(["@openclaw/codex", "@openclaw/voice-call"]);
+    expect(plan.dockerRunArgs.join(" ")).toContain("openclaw plugins install '@openclaw/codex'");
     expect(plan.dockerRunArgs.join(" ")).toContain("openclaw plugins install '@openclaw/voice-call'");
     expect(plan.dockerRunArgs.join(" ")).toContain("--bind lan");
     expect(volumes).toContain(`${plan.stateDir}:/home/node/.openclaw:rw`);
     expect(volumes).toContain(`${plan.workspaceDir}:/home/node/.openclaw/workspace:rw`);
     expect(volumes).toContain(`${envFile}:/home/node/.openclaw/.env:ro`);
     expect(volumes).toContain(`${authSecretDir}:/home/node/.config/openclaw:ro`);
-    expect(volumes).toContain(`${authDb}:/home/node/.openclaw/agents/main/agent/openclaw-agent.sqlite:ro`);
-    expect(volumes).toContain(`${authDb}-wal:/home/node/.openclaw/agents/main/agent/openclaw-agent.sqlite-wal:ro`);
-    expect(volumes).toContain(`${authDb}-shm:/home/node/.openclaw/agents/main/agent/openclaw-agent.sqlite-shm:ro`);
+    expect(volumes).toContain(`${authDb}:/home/node/.openclaw/.seed-auth/agents/main/agent/openclaw-agent.sqlite:ro`);
+    expect(volumes).toContain(`${authDb}-wal:/home/node/.openclaw/.seed-auth/agents/main/agent/openclaw-agent.sqlite-wal:ro`);
+    expect(volumes).toContain(`${authDb}-shm:/home/node/.openclaw/.seed-auth/agents/main/agent/openclaw-agent.sqlite-shm:ro`);
+    expect(volumes).not.toContain(`${authDb}:/home/node/.openclaw/agents/main/agent/openclaw-agent.sqlite:ro`);
     expect(volumes).not.toContain(`${authStateDir}:/home/node/.openclaw:rw`);
   });
 
@@ -259,12 +299,28 @@ describe("isolated OpenClaw Gateway Docker plan", () => {
       "--setup-code-only",
     ]);
     expect(plan.e2eAgentArgs).toEqual([
+      "--node",
+      "auto",
       "--openclaw-container",
-      "openclaw-even-g2-test-unit-run",
+      "openclaw-even-g2-node-test-unit-run",
       "--openclaw-url",
       "ws://127.0.0.1:19001",
       "--openclaw-token",
       "unit-token",
+    ]);
+    expect(plan.e2eAgentEnv.EVENG2_E2E_NODE).toBe("auto");
+    expect(plan.approvalCommand).toEqual([
+      "pnpm",
+      "device:approve:latest",
+      "--",
+      "--openclaw-container",
+      "openclaw-even-g2-node-test-unit-run",
+      "--e2e-isolated-state-dir",
+      plan.stateDir,
+      "--watch-ms",
+      "45000",
+      "--settle-ms",
+      "8000",
     ]);
   });
 

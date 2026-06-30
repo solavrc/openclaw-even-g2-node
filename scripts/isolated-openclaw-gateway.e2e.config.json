@@ -30,6 +30,9 @@
   "plugins": {
     "enabled": true,
     "entries": {
+      "codex": {
+        "enabled": true
+      },
       "voice-call": {
         "enabled": true,
         "config": {
@@ -46,6 +49,41 @@
         "enabled": true
       }
     }
+  },
+  "agents": {
+    "defaults": {
+      "workspace": "/home/node/.openclaw/workspace",
+      "userTimezone": "Asia/Tokyo",
+      "model": {
+        "primary": "openai/gpt-5.5",
+        "fallbacks": []
+      },
+      "models": {
+        "openai/gpt-5.5": {
+          "agentRuntime": {
+            "id": "codex"
+          }
+        }
+      }
+    },
+    "list": [
+      {
+        "id": "main",
+        "default": true,
+        "workspace": "/home/node/.openclaw/workspace",
+        "model": {
+          "primary": "openai/gpt-5.5",
+          "fallbacks": []
+        },
+        "models": {
+          "openai/gpt-5.5": {
+            "agentRuntime": {
+              "id": "codex"
+            }
+          }
+        }
+      }
+    ]
   },
   "tools": {
     "profile": "minimal",

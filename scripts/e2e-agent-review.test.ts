@@ -9,6 +9,7 @@ import {
   nodeStatusHasConnectedNode,
   redactCommandArgs,
   redactText,
+  resolveConnectedNodeName,
 } from "./e2e-agent-review.ts";
 
 describe("e2e agent review helpers", () => {
@@ -87,6 +88,39 @@ describe("e2e agent review helpers", () => {
           { nodeId: "node-even-g2", displayName: "Even G2 Local", connected: true },
         ],
       },
+    })).toBe(true);
+  });
+
+  it("resolves auto node selection to the connected Even G2 node id", () => {
+    const nodeStatus = {
+      ok: true,
+      args: ["openclaw", "nodes", "status"],
+      exitCode: 0,
+      stdout: "{}",
+      stderr: "",
+      timedOut: false,
+      json: {
+        nodes: [
+          { nodeId: "stale-node", displayName: "Even G2", platform: "even-g2", connected: false },
+          { nodeId: "connected-node", displayName: "Even G2", platform: "even-g2", connected: true },
+        ],
+      },
+    };
+
+    expect(resolveConnectedNodeName("auto", nodeStatus)).toBe("connected-node");
+    expect(resolveConnectedNodeName("Even G2", nodeStatus)).toBe("connected-node");
+    expect(nodeStatusHasConnectedNode({
+      context: {
+        authProvided: false,
+        container: "",
+        profile: "",
+        url: "",
+      },
+      enabled: true,
+      liveCanvas: false,
+      nodeName: "auto",
+      nodeStatus,
+      resolvedNodeName: "connected-node",
     })).toBe(true);
   });
 

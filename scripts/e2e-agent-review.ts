@@ -58,6 +58,7 @@ type OpenClawEvidence = {
   liveCanvas: boolean;
   nodeName: string;
   nodeStatus?: CommandEvidence;
+  resolvedNodeName?: string;
 };
 
 type SimulatorEvidence = {
@@ -95,7 +96,7 @@ Usage:
 Options:
   --out-dir <path>          Output directory. Default: .openclaw-even-g2-node/e2e-agent-runs/<timestamp>
   --simulator-url <url>     Even Hub simulator automation URL. Default: ${DEFAULT_SIMULATOR_URL}
-  --node <name>             OpenClaw node name/id. Default: ${DEFAULT_NODE_NAME}
+  --node <name>             OpenClaw node name/id. Use "auto" to select a connected Even G2 node. Default: ${DEFAULT_NODE_NAME}
   --openclaw-container <n>  OpenClaw container name for all CLI node evidence. Default: EVENG2_E2E_OPENCLAW_CONTAINER
   --openclaw-profile <name> OpenClaw CLI profile for node evidence. Default: EVENG2_E2E_OPENCLAW_PROFILE or current CLI profile
   --openclaw-url <url>      Gateway WebSocket URL for node evidence. Default: EVENG2_E2E_OPENCLAW_URL or OpenClaw CLI config
@@ -293,12 +294,12 @@ export function redactCommandArgs(args: string[]) {
   });
 }
 
-function openClawInvokeArgs(args: ParsedArgs, command: string, params: unknown, timeoutMs: number) {
+function openClawInvokeArgs(args: ParsedArgs, nodeName: string, command: string, params: unknown, timeoutMs: number) {
   return [
     "nodes",
     "invoke",
     "--node",
-    args.nodeName,
+    nodeName,
     "--command",
     command,
     "--params",
@@ -370,16 +371,17 @@ function collectOpenClawEvidence(args: ParsedArgs): OpenClawEvidence {
     openClawGatewayArgs(args, ["nodes", "status"]),
     args.openclawTimeoutMs + 1_000,
   );
+  evidence.resolvedNodeName = resolveConnectedNodeName(args.nodeName, evidence.nodeStatus);
   if (args.liveCanvas) {
     evidence.canvasPresent = runOpenClaw(
       args,
-      openClawInvokeArgs(args, "canvas.present", { text: args.canvasText }, args.openclawTimeoutMs),
+      openClawInvokeArgs(args, evidence.resolvedNodeName, "canvas.present", { text: args.canvasText }, args.openclawTimeoutMs),
       args.openclawTimeoutMs + 1_000,
     );
   }
   evidence.canvasSnapshot = runOpenClaw(
     args,
-    openClawInvokeArgs(args, "canvas.snapshot", {}, args.openclawTimeoutMs),
+    openClawInvokeArgs(args, evidence.resolvedNodeName, "canvas.snapshot", {}, args.openclawTimeoutMs),
     args.openclawTimeoutMs + 1_000,
   );
   return evidence;
@@ -393,12 +395,49 @@ function commandJsonNodes(command: CommandEvidence | undefined) {
   return Array.isArray(nodes) ? nodes : [];
 }
 
+function readString(value: unknown) {
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : "";
+}
+
+function nodeRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : null;
+}
+
+function isEvenG2NodeRecord(entry: Record<string, unknown>) {
+  const displayName = readString(entry.displayName).toLowerCase();
+  const platform = readString(entry.platform).toLowerCase();
+  const clientId = readString(entry.clientId).toLowerCase();
+  const deviceFamily = readString(entry.deviceFamily).toLowerCase();
+  return platform === "even-g2"
+    || clientId === "openclaw-even-g2-node"
+    || displayName.includes("even g2")
+    || (clientId === "node-host" && deviceFamily === "glasses");
+}
+
+export function resolveConnectedNodeName(requestedNodeName: string, nodeStatus: CommandEvidence | undefined) {
+  const requested = requestedNodeName.trim();
+  const auto = requested.toLowerCase() === "auto";
+  const nodes = commandJsonNodes(nodeStatus)
+    .map(nodeRecord)
+    .filter((node): node is Record<string, unknown> => Boolean(node));
+  const match = nodes.find((node) => {
+    if (node.connected !== true) return false;
+    if (auto) return isEvenG2NodeRecord(node);
+    return readString(node.nodeId) === requested || readString(node.displayName) === requested;
+  });
+  return readString(match?.nodeId) || requestedNodeName;
+}
+
 export function nodeStatusHasConnectedNode(openclaw: OpenClawEvidence) {
   const nodes = commandJsonNodes(openclaw.nodeStatus);
+  const resolvedNodeName = openclaw.resolvedNodeName || resolveConnectedNodeName(openclaw.nodeName, openclaw.nodeStatus);
   return nodes.some((node) => {
-    if (!node || typeof node !== "object" || Array.isArray(node)) return false;
-    const entry = node as Record<string, unknown>;
-    return entry.connected === true && (entry.displayName === openclaw.nodeName || entry.nodeId === openclaw.nodeName);
+    const entry = nodeRecord(node);
+    if (!entry) return false;
+    if (entry.connected !== true) return false;
+    if (readString(entry.nodeId) === resolvedNodeName || readString(entry.displayName) === resolvedNodeName) return true;
+    if (openclaw.nodeName.toLowerCase() === "auto") return isEvenG2NodeRecord(entry);
+    return readString(entry.nodeId) === openclaw.nodeName || readString(entry.displayName) === openclaw.nodeName;
   });
 }
 

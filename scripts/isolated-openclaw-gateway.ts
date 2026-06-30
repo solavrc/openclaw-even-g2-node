@@ -45,6 +45,7 @@ type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string
 type JsonObject = { [key: string]: JsonValue };
 
 type MinimalOpenClawConfig = {
+  agents?: JsonObject;
   env: {
     shellEnv: { enabled: false };
     vars: Record<string, never>;
@@ -75,6 +76,7 @@ type MinimalOpenClawConfig = {
     media?: JsonObject;
     profile: "minimal";
   };
+  models?: JsonObject;
 };
 
 export type IsolatedGatewayPlan = {
@@ -84,6 +86,7 @@ export type IsolatedGatewayPlan = {
   containerName: string;
   containerPort: number;
   dockerRunArgs: string[];
+  approvalCommand: string[];
   e2eAgentArgs: string[];
   e2eAgentEnv: Record<string, string>;
   configTemplatePath: string;
@@ -105,6 +108,7 @@ export type IsolatedGatewayPlan = {
 const CONTAINER_HOME = "/home/node";
 const CONTAINER_STATE_DIR = `${CONTAINER_HOME}/.openclaw`;
 const CONTAINER_WORKSPACE_DIR = `${CONTAINER_STATE_DIR}/workspace`;
+const CONTAINER_AUTH_SEED_DIR = `${CONTAINER_STATE_DIR}/.seed-auth`;
 const CONTAINER_AUTH_PROFILE_SECRET_DIR = `${CONTAINER_HOME}/.config/openclaw`;
 const DEFAULT_CONTAINER_PORT = 19_001;
 const DEFAULT_CONTROL_ORIGINS = [
@@ -115,7 +119,7 @@ const DEFAULT_CONTROL_ORIGINS = [
 ];
 const DEFAULT_OUT_ROOT = path.join(process.cwd(), ".openclaw-even-g2-node", "isolated-gateway");
 const DEFAULT_IMAGE = "node:22-bookworm";
-const FULL_E2E_PLUGIN_PACKAGES = ["@openclaw/voice-call"];
+const FULL_E2E_PLUGIN_PACKAGES = ["@openclaw/codex", "@openclaw/voice-call"];
 const GATEWAY_TOKEN_ENV = "OPENCLAW_GATEWAY_TOKEN";
 const ROLE_LABEL = "openclaw-even-g2-node.role=isolated-gateway";
 export const MINIMAL_GATEWAY_CONFIG_TEMPLATE_PATH = path.join(
@@ -173,7 +177,7 @@ function sanitizeName(value: string) {
 }
 
 function defaultContainerName(runId: string) {
-  return `openclaw-even-g2-test-${sanitizeName(runId)}`;
+  return `openclaw-even-g2-node-test-${sanitizeName(runId)}`;
 }
 
 function defaultAuthStateDir() {
@@ -408,10 +412,12 @@ export function createMinimalOpenClawConfig(input: {
       },
     },
     plugins: pluginConfig,
+    ...(template.agents ? { agents: template.agents } : {}),
     tools: {
       profile: template.tools.profile,
       ...(template.tools.media ? { media: template.tools.media } : {}),
     },
+    ...(template.models ? { models: template.models } : {}),
   };
 }
 
@@ -498,9 +504,9 @@ function defaultReadOnlyBinds(args: ParsedArgs): BindMount[] {
     if (!hostPathExists(source)) continue;
     binds.push({
       access: "ro",
-      reason: "Provider auth profile state; mounted read-only",
+      reason: "Provider auth profile state seed; mounted read-only then copied into generated state",
       source,
-      target: `${CONTAINER_STATE_DIR}/${relativeFile}`,
+      target: `${CONTAINER_AUTH_SEED_DIR}/${relativeFile}`,
     });
   }
 
@@ -526,6 +532,16 @@ function gatewayShellCommand(openclawPackage: string, installPluginPackages: str
     "set -eu",
     "npm config set fund false >/dev/null",
     "npm config set audit false >/dev/null",
+    [
+      `if [ -d "${CONTAINER_AUTH_SEED_DIR}" ]; then`,
+      `(cd "${CONTAINER_AUTH_SEED_DIR}" && find . -type f -print | while IFS= read -r file; do`,
+      `target="${CONTAINER_STATE_DIR}/\${file#./}";`,
+      `mkdir -p "$(dirname "$target")";`,
+      `cp "$file" "$target";`,
+      `chmod u+rw "$target" 2>/dev/null || true;`,
+      "done);",
+      "fi",
+    ].join(" "),
     `npm install -g ${shellQuote(openclawPackage)}`,
     ...installPluginPackages.map((pluginPackage) => `openclaw plugins install ${shellQuote(pluginPackage)}`),
     `exec openclaw gateway run --allow-unconfigured --bind lan --port "$OPENCLAW_GATEWAY_PORT" --auth token --token "$${GATEWAY_TOKEN_ENV}" --ws-log compact`,
@@ -634,6 +650,8 @@ export function buildGatewayPlan(args: ParsedArgs): IsolatedGatewayPlan {
     workspaceDir,
   });
   const e2eAgentArgs = [
+    "--node",
+    "auto",
     "--openclaw-container",
     args.containerName,
     "--openclaw-url",
@@ -644,6 +662,19 @@ export function buildGatewayPlan(args: ParsedArgs): IsolatedGatewayPlan {
   return {
     config,
     configPath,
+    approvalCommand: [
+      "pnpm",
+      "device:approve:latest",
+      "--",
+      "--openclaw-container",
+      args.containerName,
+      "--e2e-isolated-state-dir",
+      stateDir,
+      "--watch-ms",
+      "45000",
+      "--settle-ms",
+      "8000",
+    ],
     configTemplatePath: args.configTemplatePath,
     containerGatewayUrl,
     containerName: args.containerName,
@@ -651,6 +682,7 @@ export function buildGatewayPlan(args: ParsedArgs): IsolatedGatewayPlan {
     dockerRunArgs,
     e2eAgentArgs,
     e2eAgentEnv: {
+      EVENG2_E2E_NODE: "auto",
       EVENG2_E2E_OPENCLAW_CONTAINER: args.containerName,
       EVENG2_E2E_OPENCLAW_TOKEN: args.token,
       EVENG2_E2E_OPENCLAW_URL: containerGatewayUrl,
@@ -707,6 +739,7 @@ function planSummary(plan: IsolatedGatewayPlan) {
   return {
     ...plan,
     dockerRunArgsRedacted: redactCommand(["docker", ...plan.dockerRunArgs]),
+    approvalCommand: plan.approvalCommand,
     e2eAgentCommand: ["pnpm", "e2e:agent:live", "--", ...plan.e2eAgentArgs],
     simulatorUrl: `http://127.0.0.1:5174/?resetPairing=1&e2eLog=1&setupCode=<setup-code>`,
   };

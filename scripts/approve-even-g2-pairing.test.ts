@@ -1,5 +1,9 @@
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { describe, expect, it } from "vitest";
 import {
+  grantIsolatedE2eCliAdmin,
   parseArgs,
   parseDevicePendingList,
   parseDevicePreview,
@@ -32,6 +36,8 @@ describe("approve Even G2 pairing helpers", () => {
       "wss://gateway.example/ws",
       "--token",
       "token",
+      "--e2e-isolated-state-dir",
+      "/tmp/isolated-state",
       "--watch-ms",
       "45000",
       "--settle-ms",
@@ -39,9 +45,66 @@ describe("approve Even G2 pairing helpers", () => {
     ])).toMatchObject({
       settleMs: 2500,
       watchMs: 45000,
+      e2eIsolatedStateDir: "/tmp/isolated-state",
       openclawArgs: ["--url", "wss://gateway.example/ws", "--token", "token"],
       openclawGlobalArgs: [],
     });
+  });
+
+  it("grants isolated E2E CLI admin scopes without touching Even G2 pending requests", () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "even-g2-approve-helper-"));
+    try {
+      const devicesDir = path.join(root, "devices");
+      fs.mkdirSync(devicesDir, { recursive: true });
+      fs.writeFileSync(path.join(devicesDir, "paired.json"), `${JSON.stringify({
+        "cli-device": {
+          clientId: "cli",
+          clientMode: "cli",
+          platform: "linux",
+          scopes: ["operator.read"],
+          approvedScopes: ["operator.read"],
+          tokens: {
+            operator: {
+              scopes: ["operator.read"],
+            },
+          },
+        },
+        "even-g2-device": {
+          clientId: "node-host",
+          platform: "even-g2",
+          scopes: [],
+        },
+      }, null, 2)}\n`);
+      fs.writeFileSync(path.join(devicesDir, "pending.json"), `${JSON.stringify({
+        "cli-scope-request": {
+          clientId: "cli",
+          clientMode: "cli",
+          scopes: ["operator.admin"],
+        },
+        "even-g2-request": {
+          clientId: "node-host",
+          platform: "even-g2",
+        },
+      }, null, 2)}\n`);
+
+      const result = grantIsolatedE2eCliAdmin(root);
+      const paired = JSON.parse(fs.readFileSync(path.join(devicesDir, "paired.json"), "utf8"));
+      const pending = JSON.parse(fs.readFileSync(path.join(devicesDir, "pending.json"), "utf8"));
+
+      expect(result).toMatchObject({ ok: true, deviceId: "cli-device", removedPending: 1 });
+      expect(paired["cli-device"].scopes).toContain("operator.admin");
+      expect(paired["cli-device"].approvedScopes).toContain("operator.pairing");
+      expect(paired["cli-device"].tokens.operator.scopes).toContain("operator.write");
+      expect(paired["even-g2-device"].scopes).toEqual([]);
+      expect(pending).toEqual({
+        "even-g2-request": {
+          clientId: "node-host",
+          platform: "even-g2",
+        },
+      });
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
   });
 
   it("keeps OpenClaw global isolation options before subcommands", () => {
