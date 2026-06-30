@@ -278,6 +278,9 @@ pnpm dev:reset-pairing
 - Voice input starts only during an active glasses voice action.
 - Gateway URL-scoped device tokens, selected session, voice mode, and local app
   settings are stored locally so the next launch can reconnect.
+- Treat setup QR codes, setup codes, Gateway URL-scoped device tokens, and
+  private Gateway origins as secrets. Do not include them in screenshots, issue
+  reports, logs, docs, or packaged builds.
 - Provider credentials, model choices, API keys, OAuth profiles, and billing
   decisions stay in OpenClaw Gateway.
 
