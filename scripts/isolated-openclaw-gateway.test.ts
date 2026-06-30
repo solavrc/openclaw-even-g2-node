@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   buildGatewayPlan,
   createMinimalOpenClawConfig,
+  MINIMAL_GATEWAY_CONFIG_TEMPLATE_PATH,
   parseArgs,
 } from "./isolated-openclaw-gateway.ts";
 
@@ -49,6 +50,22 @@ afterEach(() => {
 });
 
 describe("isolated OpenClaw Gateway config", () => {
+  it("keeps the visible JSON template aligned with the default generated config", () => {
+    const template = JSON.parse(fs.readFileSync(MINIMAL_GATEWAY_CONFIG_TEMPLATE_PATH, "utf8")) as unknown;
+    const generated = createMinimalOpenClawConfig({
+      containerPort: 19001,
+      controlOrigins: [
+        "http://127.0.0.1:5174",
+        "http://localhost:5174",
+        "http://127.0.0.1:35162",
+        "http://localhost:35162",
+      ],
+      plugins: [],
+    });
+
+    expect(generated).toEqual(template);
+  });
+
   it("builds a minimal local token Gateway config without copied auth profiles", () => {
     const config = createMinimalOpenClawConfig({
       containerPort: 19001,

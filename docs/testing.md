@@ -271,8 +271,11 @@ pnpm e2e:gateway:start
 
 The helper writes generated state under
 `.openclaw-even-g2-node/isolated-gateway/<run-id>/`. It creates a new
-`state/openclaw.json` instead of copying the user's active config. The generated
-config is intentionally small:
+`state/openclaw.json` instead of copying the user's active config. The visible
+template lives at `scripts/isolated-openclaw-gateway.config.json`; the helper
+copies that shape and applies only runtime values such as port, control
+origins, and optional plugin allowlists. The generated config is intentionally
+small:
 
 - `env.shellEnv.enabled=false` so login-shell imports do not hide missing
   requirements;

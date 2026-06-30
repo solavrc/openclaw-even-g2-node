@@ -3,7 +3,7 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { errorStack } from "./strict-helpers.ts";
 
 type Command = "plan" | "start" | "stop";
@@ -108,6 +108,10 @@ const DEFAULT_OUT_ROOT = path.join(process.cwd(), ".openclaw-even-g2-node", "iso
 const DEFAULT_IMAGE = "node:22-bookworm";
 const GATEWAY_TOKEN_ENV = "OPENCLAW_GATEWAY_TOKEN";
 const ROLE_LABEL = "openclaw-even-g2-node.role=isolated-gateway";
+export const MINIMAL_GATEWAY_CONFIG_TEMPLATE_PATH = path.join(
+  path.dirname(fileURLToPath(import.meta.url)),
+  "isolated-openclaw-gateway.config.json",
+);
 
 const HELP = `Run an isolated Docker-backed OpenClaw Gateway for local Even G2 E2E tests.
 
@@ -340,34 +344,39 @@ export function createMinimalOpenClawConfig(input: {
   plugins: string[];
   tokenEnvName?: string;
 }): MinimalOpenClawConfig {
+  const template = readMinimalGatewayConfigTemplate();
   const plugins = uniqueStrings(input.plugins);
   return {
     env: {
-      shellEnv: { enabled: false },
+      shellEnv: { ...template.env.shellEnv },
       vars: {},
     },
     gateway: {
-      mode: "local",
-      bind: "lan",
+      mode: template.gateway.mode,
+      bind: template.gateway.bind,
       port: input.containerPort,
       auth: {
-        mode: "token",
+        mode: template.gateway.auth.mode,
         token: {
-          source: "env",
-          provider: "openclaw",
-          id: input.tokenEnvName || GATEWAY_TOKEN_ENV,
+          source: template.gateway.auth.token.source,
+          provider: template.gateway.auth.token.provider,
+          id: input.tokenEnvName || template.gateway.auth.token.id,
         },
       },
       controlUi: {
-        enabled: false,
+        enabled: template.gateway.controlUi.enabled,
         allowedOrigins: uniqueStrings(input.controlOrigins),
       },
     },
-    plugins: plugins.length ? { enabled: true, allow: plugins } : { enabled: true },
+    plugins: plugins.length ? { enabled: template.plugins.enabled, allow: plugins } : { enabled: template.plugins.enabled },
     tools: {
-      profile: "minimal",
+      profile: template.tools.profile,
     },
   };
+}
+
+function readMinimalGatewayConfigTemplate(): MinimalOpenClawConfig {
+  return JSON.parse(fs.readFileSync(MINIMAL_GATEWAY_CONFIG_TEMPLATE_PATH, "utf8")) as MinimalOpenClawConfig;
 }
 
 function shellQuote(value: string) {
