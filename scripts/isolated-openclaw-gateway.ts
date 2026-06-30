@@ -23,11 +23,13 @@ type ParsedArgs = {
   containerNameProvided: boolean;
   containerPort: number;
   controlOrigins: string[];
+  configTemplatePath: string;
   defaultAuthBinds: boolean;
   defaultEnvFile: boolean;
   envFile: string;
   hostPort: number;
   image: string;
+  installPluginPackages: string[];
   openclawPackage: string;
   outRoot: string;
   plugins: string[];
@@ -38,6 +40,9 @@ type ParsedArgs = {
   token: string;
   waitMs: number;
 };
+
+type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue };
+type JsonObject = { [key: string]: JsonValue };
 
 type MinimalOpenClawConfig = {
   env: {
@@ -64,8 +69,10 @@ type MinimalOpenClawConfig = {
   plugins: {
     allow?: string[];
     enabled: true;
+    entries?: Record<string, JsonObject>;
   };
   tools: {
+    media?: JsonObject;
     profile: "minimal";
   };
 };
@@ -79,9 +86,11 @@ export type IsolatedGatewayPlan = {
   dockerRunArgs: string[];
   e2eAgentArgs: string[];
   e2eAgentEnv: Record<string, string>;
+  configTemplatePath: string;
   hostGatewayUrl: string;
   hostPort: number;
   image: string;
+  installPluginPackages: string[];
   mounts: BindMount[];
   openclawPackage: string;
   outDir: string;
@@ -106,11 +115,16 @@ const DEFAULT_CONTROL_ORIGINS = [
 ];
 const DEFAULT_OUT_ROOT = path.join(process.cwd(), ".openclaw-even-g2-node", "isolated-gateway");
 const DEFAULT_IMAGE = "node:22-bookworm";
+const FULL_E2E_PLUGIN_PACKAGES = ["@openclaw/voice-call"];
 const GATEWAY_TOKEN_ENV = "OPENCLAW_GATEWAY_TOKEN";
 const ROLE_LABEL = "openclaw-even-g2-node.role=isolated-gateway";
 export const MINIMAL_GATEWAY_CONFIG_TEMPLATE_PATH = path.join(
   path.dirname(fileURLToPath(import.meta.url)),
   "isolated-openclaw-gateway.config.json",
+);
+export const FULL_E2E_GATEWAY_CONFIG_TEMPLATE_PATH = path.join(
+  path.dirname(fileURLToPath(import.meta.url)),
+  "isolated-openclaw-gateway.e2e.config.json",
 );
 
 const HELP = `Run an isolated Docker-backed OpenClaw Gateway for local Even G2 E2E tests.
@@ -133,6 +147,9 @@ Options:
   --out-root <path>           Generated state root. Default: ${DEFAULT_OUT_ROOT}
   --image <name>              Docker image. Default: ${DEFAULT_IMAGE}
   --openclaw-package <spec>   NPM package installed in the container.
+  --config-template <path>    openclaw.json template copied into generated state.
+  --full-e2e-config           Use the bundled full-story E2E Gateway template.
+  --install-plugin <pkg>      Install an OpenClaw plugin package in the container. Repeatable.
   --token <token>             Gateway token. Default: generated test token.
   --plugin <id>               Add plugins.allow entry. Repeatable; omitted by default.
   --control-origin <origin>   Add controlUi.allowedOrigins entry. Repeatable.
@@ -244,11 +261,13 @@ export function parseArgs(argv: string[], now = new Date()): ParsedArgs {
     containerNameProvided: false,
     containerPort: DEFAULT_CONTAINER_PORT,
     controlOrigins: [...DEFAULT_CONTROL_ORIGINS],
+    configTemplatePath: MINIMAL_GATEWAY_CONFIG_TEMPLATE_PATH,
     defaultAuthBinds: true,
     defaultEnvFile: true,
     envFile: defaultEnvFile(),
     hostPort: DEFAULT_CONTAINER_PORT,
     image: DEFAULT_IMAGE,
+    installPluginPackages: [],
     openclawPackage: detectHostOpenClawPackage(),
     outRoot: DEFAULT_OUT_ROOT,
     plugins: [],
@@ -294,6 +313,15 @@ export function parseArgs(argv: string[], now = new Date()): ParsedArgs {
     } else if (arg === "--openclaw-package") {
       args.openclawPackage = readFlagValue(argv, index, arg);
       index += 1;
+    } else if (arg === "--config-template") {
+      args.configTemplatePath = resolveHostPath(readFlagValue(argv, index, arg));
+      index += 1;
+    } else if (arg === "--full-e2e-config") {
+      args.configTemplatePath = FULL_E2E_GATEWAY_CONFIG_TEMPLATE_PATH;
+      args.installPluginPackages.push(...FULL_E2E_PLUGIN_PACKAGES);
+    } else if (arg === "--install-plugin") {
+      args.installPluginPackages.push(readFlagValue(argv, index, arg));
+      index += 1;
     } else if (arg === "--token") {
       args.token = readFlagValue(argv, index, arg);
       index += 1;
@@ -333,19 +361,30 @@ export function parseArgs(argv: string[], now = new Date()): ParsedArgs {
   }
 
   args.controlOrigins = uniqueStrings(args.controlOrigins);
+  args.installPluginPackages = uniqueStrings(args.installPluginPackages);
   args.plugins = uniqueStrings(args.plugins);
   args.readOnlyBinds = dedupeBinds(args.readOnlyBinds);
   return args;
 }
 
 export function createMinimalOpenClawConfig(input: {
+  configTemplatePath?: string;
   containerPort: number;
   controlOrigins: string[];
   plugins: string[];
   tokenEnvName?: string;
 }): MinimalOpenClawConfig {
-  const template = readMinimalGatewayConfigTemplate();
+  const template = readGatewayConfigTemplate(input.configTemplatePath || MINIMAL_GATEWAY_CONFIG_TEMPLATE_PATH);
   const plugins = uniqueStrings(input.plugins);
+  const pluginConfig = {
+    enabled: template.plugins.enabled,
+    ...(template.plugins.entries ? { entries: template.plugins.entries } : {}),
+    ...(plugins.length
+      ? { allow: plugins }
+      : template.plugins.allow
+        ? { allow: template.plugins.allow }
+        : {}),
+  };
   return {
     env: {
       shellEnv: { ...template.env.shellEnv },
@@ -368,15 +407,16 @@ export function createMinimalOpenClawConfig(input: {
         allowedOrigins: uniqueStrings(input.controlOrigins),
       },
     },
-    plugins: plugins.length ? { enabled: template.plugins.enabled, allow: plugins } : { enabled: template.plugins.enabled },
+    plugins: pluginConfig,
     tools: {
       profile: template.tools.profile,
+      ...(template.tools.media ? { media: template.tools.media } : {}),
     },
   };
 }
 
-function readMinimalGatewayConfigTemplate(): MinimalOpenClawConfig {
-  return JSON.parse(fs.readFileSync(MINIMAL_GATEWAY_CONFIG_TEMPLATE_PATH, "utf8")) as MinimalOpenClawConfig;
+function readGatewayConfigTemplate(templatePath: string): MinimalOpenClawConfig {
+  return JSON.parse(fs.readFileSync(templatePath, "utf8")) as MinimalOpenClawConfig;
 }
 
 function shellQuote(value: string) {
@@ -389,6 +429,15 @@ function redactCommand(args: string[]) {
     if (previous === "--token" || arg.startsWith(`${GATEWAY_TOKEN_ENV}=`)) return "<redacted>";
     return arg.replace(new RegExp(`${GATEWAY_TOKEN_ENV}=[^\\s]+`, "g"), `${GATEWAY_TOKEN_ENV}=<redacted>`);
   });
+}
+
+export function extractSetupCodeOutput(stdout: string) {
+  const trimmed = stdout.trim();
+  const lines = trimmed.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  const setupCode = [...lines].reverse().find((line) => (
+    /^(?:[A-Za-z0-9_-]{24,}={0,2}|(?:wss?|https?):\/\/\S+)$/.test(line)
+  ));
+  return setupCode || trimmed;
 }
 
 function hostPathExists(hostPath: string) {
@@ -472,12 +521,13 @@ function volumeArg(bind: BindMount) {
   return `${bind.source}:${bind.target}:${bind.access}`;
 }
 
-function gatewayShellCommand(openclawPackage: string) {
+function gatewayShellCommand(openclawPackage: string, installPluginPackages: string[]) {
   return [
     "set -eu",
     "npm config set fund false >/dev/null",
     "npm config set audit false >/dev/null",
     `npm install -g ${shellQuote(openclawPackage)}`,
+    ...installPluginPackages.map((pluginPackage) => `openclaw plugins install ${shellQuote(pluginPackage)}`),
     `exec openclaw gateway run --allow-unconfigured --bind lan --port "$OPENCLAW_GATEWAY_PORT" --auth token --token "$${GATEWAY_TOKEN_ENV}" --ws-log compact`,
   ].join("; ");
 }
@@ -488,6 +538,7 @@ export function buildDockerRunArgs(planInput: {
   containerPort: number;
   hostPort: number;
   image: string;
+  installPluginPackages: string[];
   mounts: BindMount[];
   openclawPackage: string;
   runId: string;
@@ -550,7 +601,7 @@ export function buildDockerRunArgs(planInput: {
     planInput.image,
     "sh",
     "-lc",
-    gatewayShellCommand(planInput.openclawPackage),
+    gatewayShellCommand(planInput.openclawPackage, planInput.installPluginPackages),
   ];
 }
 
@@ -563,6 +614,7 @@ export function buildGatewayPlan(args: ParsedArgs): IsolatedGatewayPlan {
   const containerGatewayUrl = `ws://127.0.0.1:${args.containerPort}`;
   const mounts = dedupeBinds([...defaultReadOnlyBinds(args), ...args.readOnlyBinds]);
   const config = createMinimalOpenClawConfig({
+    configTemplatePath: args.configTemplatePath,
     containerPort: args.containerPort,
     controlOrigins: args.controlOrigins,
     plugins: args.plugins,
@@ -573,6 +625,7 @@ export function buildGatewayPlan(args: ParsedArgs): IsolatedGatewayPlan {
     containerPort: args.containerPort,
     hostPort: args.hostPort,
     image: args.image,
+    installPluginPackages: args.installPluginPackages,
     mounts,
     openclawPackage: args.openclawPackage,
     runId: args.runId,
@@ -591,6 +644,7 @@ export function buildGatewayPlan(args: ParsedArgs): IsolatedGatewayPlan {
   return {
     config,
     configPath,
+    configTemplatePath: args.configTemplatePath,
     containerGatewayUrl,
     containerName: args.containerName,
     containerPort: args.containerPort,
@@ -604,6 +658,7 @@ export function buildGatewayPlan(args: ParsedArgs): IsolatedGatewayPlan {
     hostGatewayUrl,
     hostPort: args.hostPort,
     image: args.image,
+    installPluginPackages: args.installPluginPackages,
     mounts,
     openclawPackage: args.openclawPackage,
     outDir,
@@ -691,9 +746,15 @@ function openClawHostEnv(plan: IsolatedGatewayPlan): NodeJS.ProcessEnv {
   };
 }
 
-function runOpenClawForPlan(plan: IsolatedGatewayPlan, args: string[], options?: { timeout?: number }) {
+function runOpenClawForPlan(plan: IsolatedGatewayPlan, args: string[], options?: {
+  env?: Record<string, string>;
+  timeout?: number;
+}) {
   return runCommand("openclaw", args, {
-    env: openClawHostEnv(plan),
+    env: {
+      ...openClawHostEnv(plan),
+      ...options?.env,
+    },
     timeout: options?.timeout,
   });
 }
@@ -728,16 +789,34 @@ async function waitForGateway(plan: IsolatedGatewayPlan, waitMs: number) {
 }
 
 function setupCodeFor(plan: IsolatedGatewayPlan) {
-  const result = runOpenClawForPlan(plan, plan.setupCodeCommand.slice(1), { timeout: 10_000 });
+  const setupConfigPath = path.join(plan.stateDir, "openclaw.setup-code.json");
+  fs.writeFileSync(setupConfigPath, `${JSON.stringify(createMinimalOpenClawConfig({
+    containerPort: plan.containerPort,
+    controlOrigins: plan.config.gateway.controlUi.allowedOrigins,
+    plugins: [],
+    tokenEnvName: plan.config.gateway.auth.token.id,
+  }), null, 2)}\n`);
+  const result = runOpenClawForPlan(plan, plan.setupCodeCommand.slice(1), {
+    env: {
+      OPENCLAW_CONFIG_PATH: setupConfigPath,
+    },
+    timeout: 10_000,
+  });
   if (result.status !== 0) {
     return {
       ok: false,
       error: result.stderr || result.stdout || result.error?.message || "setup-code generation failed",
     };
   }
+  const output = result.stdout.trim();
+  const setupCode = extractSetupCodeOutput(output);
+  const diagnostics = output === setupCode
+    ? ""
+    : output.split(/\r?\n/).filter((line) => line.trim() !== setupCode).join("\n").trim();
   return {
     ok: true,
-    setupCode: result.stdout.trim(),
+    setupCode,
+    ...(diagnostics ? { diagnostics } : {}),
   };
 }
 

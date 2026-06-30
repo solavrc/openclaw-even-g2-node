@@ -5,6 +5,8 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   buildGatewayPlan,
   createMinimalOpenClawConfig,
+  extractSetupCodeOutput,
+  FULL_E2E_GATEWAY_CONFIG_TEMPLATE_PATH,
   MINIMAL_GATEWAY_CONFIG_TEMPLATE_PATH,
   parseArgs,
 } from "./isolated-openclaw-gateway.ts";
@@ -110,6 +112,85 @@ describe("isolated OpenClaw Gateway config", () => {
 
     expect(config.plugins).toEqual({ enabled: true, allow: ["voice-call", "xai"] });
   });
+
+  it("can generate the full E2E Gateway config without copying the user config", () => {
+    const config = createMinimalOpenClawConfig({
+      configTemplatePath: FULL_E2E_GATEWAY_CONFIG_TEMPLATE_PATH,
+      containerPort: 19002,
+      controlOrigins: ["http://127.0.0.1:5174"],
+      plugins: [],
+    });
+
+    expect(config).toMatchObject({
+      gateway: {
+        port: 19002,
+      },
+      plugins: {
+        enabled: true,
+        entries: {
+          "voice-call": {
+            enabled: true,
+            config: {
+              streaming: {
+                enabled: true,
+                provider: "xai",
+                providers: {
+                  xai: {},
+                },
+              },
+            },
+          },
+          xai: {
+            enabled: true,
+          },
+        },
+      },
+      tools: {
+        media: {
+          audio: {
+            enabled: true,
+            language: "ja",
+            models: [
+              {
+                type: "cli",
+                command: "whisper",
+              },
+            ],
+          },
+        },
+      },
+    });
+    expect(Object.keys(config)).not.toContain("auth");
+  });
+
+  it("keeps full E2E plugin entries when adding an allowlist", () => {
+    const config = createMinimalOpenClawConfig({
+      configTemplatePath: FULL_E2E_GATEWAY_CONFIG_TEMPLATE_PATH,
+      containerPort: 19001,
+      controlOrigins: [],
+      plugins: ["voice-call", "xai"],
+    });
+
+    expect(config.plugins.allow).toEqual(["voice-call", "xai"]);
+    expect(config.plugins.entries?.["voice-call"]).toMatchObject({
+      enabled: true,
+      config: {
+        streaming: {
+          enabled: true,
+          provider: "xai",
+        },
+      },
+    });
+  });
+
+  it("extracts setup code when OpenClaw prints config warnings first", () => {
+    expect(extractSetupCodeOutput([
+      "│",
+      "◇  Config warnings ───────────────────────────────────────────────────────╮",
+      "│  - plugins.entries.voice-call: plugin not installed: voice-call          │",
+      "eyJ1cmwiOiJ3czovLzEyNy4wLjAuMToxOTAwMyIsImJvb3RzdHJhcFRva2VuIjoiabc",
+    ].join("\n"))).toBe("eyJ1cmwiOiJ3czovLzEyNy4wLjAuMToxOTAwMyIsImJvb3RzdHJhcFRva2VuIjoiabc");
+  });
 });
 
 describe("isolated OpenClaw Gateway Docker plan", () => {
@@ -128,6 +209,7 @@ describe("isolated OpenClaw Gateway Docker plan", () => {
     const plan = buildGatewayPlan(planArgs([
       "--out-root",
       path.join(root, "runs"),
+      "--full-e2e-config",
       "--auth-state-dir",
       authStateDir,
       "--env-file",
@@ -136,6 +218,10 @@ describe("isolated OpenClaw Gateway Docker plan", () => {
     const volumes = volumeArgs(plan.dockerRunArgs);
 
     expect(plan.dockerRunArgs).toContain("--rm");
+    expect(plan.configTemplatePath).toBe(FULL_E2E_GATEWAY_CONFIG_TEMPLATE_PATH);
+    expect(plan.config.plugins.entries?.["voice-call"]).toMatchObject({ enabled: true });
+    expect(plan.installPluginPackages).toEqual(["@openclaw/voice-call"]);
+    expect(plan.dockerRunArgs.join(" ")).toContain("openclaw plugins install '@openclaw/voice-call'");
     expect(plan.dockerRunArgs.join(" ")).toContain("--bind lan");
     expect(volumes).toContain(`${plan.stateDir}:/home/node/.openclaw:rw`);
     expect(volumes).toContain(`${plan.workspaceDir}:/home/node/.openclaw/workspace:rw`);

@@ -275,9 +275,11 @@ pnpm e2e:gateway:start
 The helper writes generated state under
 `.openclaw-even-g2-node/isolated-gateway/<run-id>/`. It creates a new
 `state/openclaw.json` instead of copying the user's active config. The visible
-template lives at `scripts/isolated-openclaw-gateway.config.json`; the helper
-copies that shape and applies only runtime values such as port, control
-origins, and optional plugin allowlists. The generated config is intentionally
+base template lives at `scripts/isolated-openclaw-gateway.config.json`; the
+full-story E2E template lives at
+`scripts/isolated-openclaw-gateway.e2e.config.json`. The helper copies the
+selected shape and applies only runtime values such as port, control origins,
+and optional plugin allowlists. The default generated config is intentionally
 small:
 
 - `env.shellEnv.enabled=false` so login-shell imports do not hide missing
@@ -290,6 +292,12 @@ small:
 - `plugins.enabled=true`, with `plugins.allow` present only when `--plugin` is
   passed;
 - `tools.profile=minimal`.
+
+The default template is enough to prove that an isolated Gateway starts and can
+be probed, but it is not enough to complete all user-story E2E coverage. Full
+story coverage also needs Gateway-owned voice/media configuration, setup
+approval state, a connected Even G2 node, node command approvals, and selected
+session evidence.
 
 By default the Docker container receives only the generated state directory as a
 writable `/home/node/.openclaw` mount. The helper may add these read-only binds
@@ -309,12 +317,38 @@ really needs them:
 pnpm e2e:gateway:start -- --readonly-bind ~/.openclaw/credentials:/home/node/.openclaw/credentials
 ```
 
-For Review voice coverage, keep the base config minimal first. If the run
-reveals a real missing dependency, make it explicit with flags or docs rather
-than copying the maintainer config wholesale:
+For full-story E2E coverage, use the bundled full E2E template instead of
+copying the maintainer config wholesale:
 
 ```bash
-pnpm e2e:gateway:start -- --plugin voice-call --plugin xai
+pnpm e2e:gateway:start -- --full-e2e-config
+```
+
+That template adds the Gateway-owned Review and Send now requirements documented
+in [gateway-voice-setup.md](gateway-voice-setup.md):
+
+- `plugins.entries["voice-call"].config.streaming` with xAI selected for
+  OpenClaw Talk transcription;
+- the `xai` provider plugin enabled, relying on read-only mounted auth/profile
+  state for actual credentials;
+- `tools.media.audio` with a local Whisper CLI fallback for `Send now`.
+
+The `--full-e2e-config` preset also installs `@openclaw/voice-call` inside the
+container before starting Gateway. If `openclaw qr --setup-code-only` still
+prints `plugin not installed: voice-call`, inspect the container install log or
+override the package with `--install-plugin <package>`.
+
+The full E2E template still does not prove provider auth by itself. Verify
+`talk.catalog`, then prove the first Review recording reaches `talk.event`
+`ready` and returns transcript text. For `Send now`, make sure the selected
+session accepts audio attachments and the configured `tools.media.audio` command
+is available inside the Gateway container.
+
+If the user's OpenClaw setup uses a different Talk provider or media-audio
+chain, copy the bundled JSON to a local ignored path and pass it explicitly:
+
+```bash
+pnpm e2e:gateway:start -- --config-template /path/to/openclaw-even-g2-e2e.json
 ```
 
 `start` prints `containerName`, `hostGatewayUrl`, `containerGatewayUrl`,
