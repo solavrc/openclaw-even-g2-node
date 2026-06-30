@@ -588,6 +588,7 @@ export function approveEvenG2Pairing(argv = process.argv.slice(2)): void {
   if (!args.dryRun) maybeGrantIsolatedAdmin();
 
   do {
+    if (!args.dryRun) maybeGrantIsolatedAdmin();
     let sawNewEvenG2Request = false;
     for (const device of listPendingDevices(args.openclawGlobalArgs, args.openclawArgs)) {
       if (seen.has(`${device.kind}:${device.requestId}`)) continue;

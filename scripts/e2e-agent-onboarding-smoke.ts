@@ -206,8 +206,18 @@ function normalizeText(value: string) {
   return value.toLowerCase().replace(/\s+/g, " ").trim();
 }
 
+function looksLikePromptEcho(responseText: string) {
+  const normalized = normalizeText(responseText);
+  const prompt = normalizeText(setupOpenClawAskRequest());
+  if (!normalized || !prompt) return false;
+  if (normalized === prompt) return true;
+  const withoutCommonPrefix = normalized.replace(/^(?:prompt|input|user|message|request|submitted prompt)\s*[:>-]\s*/, "");
+  return withoutCommonPrefix === prompt;
+}
+
 export function agentOnboardingVerdict(command: AgentCommandEvidence, responseText: string) {
   const normalized = normalizeText(responseText);
+  const promptEcho = looksLikePromptEcho(responseText);
   const checks: OnboardingCheck[] = [
     {
       name: "agent-command-exit",
@@ -216,8 +226,12 @@ export function agentOnboardingVerdict(command: AgentCommandEvidence, responseTe
     },
     {
       name: "agent-response-text",
-      ok: normalized.length > 0,
-      detail: normalized.length > 0 ? `${normalized.length} normalized response characters` : "Agent response text was empty",
+      ok: normalized.length > 0 && !promptEcho,
+      detail: promptEcho
+        ? "Agent response only echoed the setup prompt"
+        : normalized.length > 0
+          ? `${normalized.length} normalized response characters`
+          : "Agent response text was empty",
     },
     {
       name: "setup-qr-guidance",

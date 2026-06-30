@@ -78,9 +78,12 @@ describe("e2e onboarding agent smoke helpers", () => {
       role: "user",
       content: setupOpenClawAskRequest(),
     });
+    const rawPromptEcho = `prompt: ${setupOpenClawAskRequest()}`;
 
     expect(agentOnboardingVerdict({ ...okCommand, stdout: generic }, generic).ok).toBe(false);
     expect(extractAgentResponseText(promptOnly)).toBe("");
     expect(agentOnboardingVerdict({ ...okCommand, stdout: promptOnly }, extractAgentResponseText(promptOnly)).ok).toBe(false);
+    expect(extractAgentResponseText(rawPromptEcho)).toBe(rawPromptEcho);
+    expect(agentOnboardingVerdict({ ...okCommand, stdout: rawPromptEcho }, extractAgentResponseText(rawPromptEcho)).ok).toBe(false);
   });
 });

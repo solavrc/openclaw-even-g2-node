@@ -443,10 +443,11 @@ function isEvenG2NodeRecord(entry: Record<string, unknown>) {
   const displayName = readString(entry.displayName).toLowerCase();
   const platform = readString(entry.platform).toLowerCase();
   const clientId = readString(entry.clientId).toLowerCase();
+  const deviceFamily = readString(entry.deviceFamily).toLowerCase();
   return platform === "even-g2"
     || clientId === "openclaw-even-g2-node"
     || displayName.includes("even g2")
-    || hasEvenG2NodeSurface(entry);
+    || (deviceFamily === "glasses" && hasEvenG2NodeSurface(entry));
 }
 
 export function resolveConnectedNodeName(requestedNodeName: string, nodeStatus: CommandEvidence | undefined) {

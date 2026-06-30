@@ -977,6 +977,10 @@ async function startGateway(args: ParsedArgs, plan: IsolatedGatewayPlan) {
     throw new Error(`Gateway readiness failed: ${wait.error || "unknown error"}`);
   }
   const setup = args.setupCode && wait.ok ? setupCodeFor(plan) : { ok: false, skipped: true };
+  if (args.setupCode && !setup.ok) {
+    stopContainer(plan.containerName);
+    throw new Error(`setup-code generation failed: ${"error" in setup ? setup.error : "unknown error"}`);
+  }
   return {
     ...planSummary(plan),
     containerId: docker.stdout.trim(),

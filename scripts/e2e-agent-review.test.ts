@@ -142,6 +142,7 @@ describe("e2e agent review helpers", () => {
       json: {
         nodes: [
           { nodeId: "generic-glasses", clientId: "node-host", deviceFamily: "glasses", connected: true },
+          { nodeId: "generic-surface", connected: true, declaredCaps: ["canvas", "talk"] },
           {
             nodeId: "surface-node",
             clientId: "node-host",
