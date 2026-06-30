@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   buildGatewayPlan,
   createMinimalOpenClawConfig,
+  DOCKER_RUN_TIMEOUT_MS,
   extractSetupCodeOutput,
   FULL_E2E_GATEWAY_CONFIG_TEMPLATE_PATH,
   MINIMAL_GATEWAY_CONFIG_TEMPLATE_PATH,
@@ -265,6 +266,23 @@ describe("isolated OpenClaw Gateway config", () => {
 });
 
 describe("isolated OpenClaw Gateway Docker plan", () => {
+  it("keeps an explicit container name independent of run-id flag order", () => {
+    const root = makeTempRoot();
+    const plan = buildGatewayPlan(planArgs([
+      "--out-root",
+      path.join(root, "runs"),
+      "--container-name",
+      "custom-even-g2-gateway",
+      "--run-id",
+      "renamed-run",
+    ]));
+
+    expect(plan.runId).toBe("renamed-run");
+    expect(plan.containerName).toBe("custom-even-g2-gateway");
+    expect(plan.dockerRunArgs).toContain("custom-even-g2-gateway");
+    expect(plan.stopCommand).toEqual(["pnpm", "e2e:gateway:stop", "--", "--container-name", "custom-even-g2-gateway"]);
+  });
+
   it("keeps generated state writable while mounting user auth inputs read-only", () => {
     const root = makeTempRoot();
     const authStateDir = path.join(root, "host-openclaw");
@@ -304,6 +322,12 @@ describe("isolated OpenClaw Gateway Docker plan", () => {
     expect(volumes).toContain(`${authDb}-shm:/home/node/.openclaw/.seed-auth/agents/main/agent/openclaw-agent.sqlite-shm:ro`);
     expect(volumes).not.toContain(`${authDb}:/home/node/.openclaw/agents/main/agent/openclaw-agent.sqlite:ro`);
     expect(volumes).not.toContain(`${authStateDir}:/home/node/.openclaw:rw`);
+
+    const command = plan.dockerRunArgs.at(-1) || "";
+    expect(plan.dockerRunArgs).toContain(`OPENCLAW_E2E_HOST_UID=${typeof process.getuid === "function" ? process.getuid() : ""}`);
+    expect(plan.dockerRunArgs).toContain(`OPENCLAW_E2E_HOST_GID=${typeof process.getgid === "function" ? process.getgid() : ""}`);
+    expect(command).toContain('chown -R "$OPENCLAW_E2E_HOST_UID:$OPENCLAW_E2E_HOST_GID"');
+    expect(command).toContain('exec setpriv --reuid "$OPENCLAW_E2E_HOST_UID" --regid "$OPENCLAW_E2E_HOST_GID" --clear-groups openclaw gateway run');
   });
 
   it("uses host URL for pairing and container URL for OpenClaw CLI evidence", () => {
@@ -375,5 +399,9 @@ describe("isolated OpenClaw Gateway Docker plan", () => {
       "--env-file",
       path.join(root, "missing.env"),
     ]))).toThrow("--env-file source is not readable");
+  });
+
+  it("allows first-time Docker image pulls longer than the Gateway readiness wait probe", () => {
+    expect(DOCKER_RUN_TIMEOUT_MS).toBeGreaterThanOrEqual(300_000);
   });
 });

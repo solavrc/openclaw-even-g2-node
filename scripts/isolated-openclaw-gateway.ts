@@ -120,6 +120,7 @@ const DEFAULT_CONTROL_ORIGINS = [
 ];
 const DEFAULT_OUT_ROOT = path.join(process.cwd(), ".openclaw-even-g2-node", "isolated-gateway");
 const DEFAULT_IMAGE = "node:22-bookworm";
+export const DOCKER_RUN_TIMEOUT_MS = 300_000;
 const FULL_E2E_PLUGIN_PACKAGES = ["@openclaw/codex", "@openclaw/voice-call"];
 const GATEWAY_TOKEN_ENV = "OPENCLAW_GATEWAY_TOKEN";
 const ROLE_LABEL = "openclaw-even-g2-node.role=isolated-gateway";
@@ -304,7 +305,7 @@ export function parseArgs(argv: string[], now = new Date()): ParsedArgs {
       index += 1;
     } else if (arg === "--run-id") {
       args.runId = sanitizeName(readFlagValue(argv, index, arg));
-      args.containerName = defaultContainerName(args.runId);
+      if (!args.containerNameProvided) args.containerName = defaultContainerName(args.runId);
       index += 1;
     } else if (arg === "--container-name") {
       args.containerName = sanitizeName(readFlagValue(argv, index, arg));
@@ -598,6 +599,22 @@ function volumeArg(bind: BindMount) {
 }
 
 function gatewayShellCommand(openclawPackage: string, installPluginPackages: string[]) {
+  const gatewayCommand = [
+    "openclaw",
+    "gateway",
+    "run",
+    "--allow-unconfigured",
+    "--bind",
+    "lan",
+    "--port",
+    "\"$OPENCLAW_GATEWAY_PORT\"",
+    "--auth",
+    "token",
+    "--token",
+    `"$${GATEWAY_TOKEN_ENV}"`,
+    "--ws-log",
+    "compact",
+  ].join(" ");
   return [
     "set -eu",
     "npm config set fund false >/dev/null",
@@ -614,8 +631,24 @@ function gatewayShellCommand(openclawPackage: string, installPluginPackages: str
     ].join(" "),
     `npm install -g ${shellQuote(openclawPackage)}`,
     ...installPluginPackages.map((pluginPackage) => `openclaw plugins install ${shellQuote(pluginPackage)}`),
-    `exec openclaw gateway run --allow-unconfigured --bind lan --port "$OPENCLAW_GATEWAY_PORT" --auth token --token "$${GATEWAY_TOKEN_ENV}" --ws-log compact`,
+    [
+      `if [ -n "$OPENCLAW_E2E_HOST_UID" ] && [ -n "$OPENCLAW_E2E_HOST_GID" ]; then`,
+      `chown -R "$OPENCLAW_E2E_HOST_UID:$OPENCLAW_E2E_HOST_GID" "${CONTAINER_STATE_DIR}" "${CONTAINER_WORKSPACE_DIR}" 2>/dev/null || true;`,
+      "fi",
+    ].join(" "),
+    [
+      `if [ "$(id -u)" = "0" ] && [ -n "$OPENCLAW_E2E_HOST_UID" ] && [ -n "$OPENCLAW_E2E_HOST_GID" ] && command -v setpriv >/dev/null 2>&1; then`,
+      `exec setpriv --reuid "$OPENCLAW_E2E_HOST_UID" --regid "$OPENCLAW_E2E_HOST_GID" --clear-groups ${gatewayCommand};`,
+      "fi",
+    ].join(" "),
+    `exec ${gatewayCommand}`,
   ].join("; ");
+}
+
+function hostUserIdentity() {
+  const uid = typeof process.getuid === "function" ? String(process.getuid()) : "";
+  const gid = typeof process.getgid === "function" ? String(process.getgid()) : "";
+  return { gid, uid };
 }
 
 export function buildDockerRunArgs(planInput: {
@@ -632,6 +665,7 @@ export function buildDockerRunArgs(planInput: {
   token: string;
   workspaceDir: string;
 }) {
+  const hostUser = hostUserIdentity();
   return [
     "run",
     "--detach",
@@ -672,6 +706,10 @@ export function buildDockerRunArgs(planInput: {
     `OPENCLAW_AUTH_PROFILE_SECRET_DIR=${CONTAINER_AUTH_PROFILE_SECRET_DIR}`,
     "--env",
     "OPENCLAW_AUTH_STORE_READONLY=1",
+    "--env",
+    `OPENCLAW_E2E_HOST_UID=${hostUser.uid}`,
+    "--env",
+    `OPENCLAW_E2E_HOST_GID=${hostUser.gid}`,
     "--env",
     "OPENCLAW_DISABLE_BONJOUR=1",
     "--env",
@@ -925,12 +963,13 @@ function setupCodeFor(plan: IsolatedGatewayPlan) {
 
 async function startGateway(args: ParsedArgs, plan: IsolatedGatewayPlan) {
   if (args.replace) stopContainer(plan.containerName);
-  const docker = runCommand("docker", plan.dockerRunArgs, { timeout: 30_000 });
+  const docker = runCommand("docker", plan.dockerRunArgs, { timeout: DOCKER_RUN_TIMEOUT_MS });
   if (docker.status !== 0) {
     throw new Error(`docker run failed:\n${docker.stderr || docker.stdout || docker.error?.message}`);
   }
   const wait = await waitForGateway(plan, args.waitMs);
   if (!wait.ok) {
+    stopContainer(plan.containerName);
     throw new Error(`Gateway readiness failed: ${wait.error || "unknown error"}`);
   }
   const setup = args.setupCode && wait.ok ? setupCodeFor(plan) : { ok: false, skipped: true };
