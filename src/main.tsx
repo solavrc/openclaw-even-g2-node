@@ -127,6 +127,7 @@ import {
   setupQrScanFailedHudFrame,
   setupQrScanPromptHudFrame,
   setupQrScannedHudFrame,
+  shouldRetryWhileAwaitingApproval,
 } from "./connection-guidance";
 import {
   createEvenHubLifecycleDedupe,
@@ -1791,8 +1792,18 @@ export function App() {
     setRetryDueAtMs(null);
   }
 
-  function scheduleReconnect(reason = "disconnected") {
-    if (!gatewayUrlRef.current || connectedRef.current || reconnectTimerRef.current !== null) return;
+  function retryOperatorApprovalNow(statusText: string) {
+    const ws = wsRef.current;
+    if (!(ws instanceof GatewayDirectTransport) || !ws.retryOperatorApproval()) return false;
+    reconnectPausedRef.current = false;
+    clearReconnectTimer();
+    setStatus(statusText);
+    return true;
+  }
+
+  function scheduleReconnect(reason = "disconnected", options: { operatorOnly?: boolean } = {}) {
+    if (!gatewayUrlRef.current || reconnectTimerRef.current !== null) return;
+    if (connectedRef.current && !options.operatorOnly) return;
     const attempt = Math.min(reconnectAttemptRef.current, 5);
     const delayMs = Math.min(MAX_RECONNECT_DELAY_MS, 1000 * (2 ** attempt));
     reconnectAttemptRef.current += 1;
@@ -1801,12 +1812,18 @@ export function App() {
     reconnectTimerRef.current = window.setTimeout(() => {
       reconnectTimerRef.current = null;
       setRetryDueAtMs(null);
+      if (options.operatorOnly) {
+        if (retryOperatorApprovalNow("checking operator approval")) return;
+        if (connectedRef.current) return;
+      }
       connect();
     }, delayMs);
   }
 
   function retryNow() {
-    if (!gatewayUrlRef.current.trim() || connectedRef.current) return;
+    if (!gatewayUrlRef.current.trim()) return;
+    if (retryOperatorApprovalNow("checking operator approval")) return;
+    if (connectedRef.current) return;
     reconnectGatewayNow("retrying now");
   }
 
@@ -2226,11 +2243,14 @@ export function App() {
   function handleGatewayErrorMessage(msg: GatewayErrorMessage) {
     const nextStatus = gatewayErrorStatusFromMessage(msg);
     const plan = connectionErrorPresentationPlan(nextStatus, msg.error, Boolean(gatewayUrlRef.current.trim()));
-    reconnectPausedRef.current = msg.pauseReconnect === true || plan.reconnectReason === "";
+    const retryAwaitingApproval = msg.pauseReconnect === true && shouldRetryWhileAwaitingApproval(plan);
+    reconnectPausedRef.current = (msg.pauseReconnect === true && !retryAwaitingApproval) || plan.reconnectReason === "";
     setStatus(nextStatus);
     if (plan.target === "guidance") void renderConnectionGuidance(plan.statusText);
     else void renderGlass(plan.frame);
-    if (!msg.pauseReconnect && plan.reconnectReason) scheduleReconnect(plan.reconnectReason);
+    if ((msg.pauseReconnect !== true || retryAwaitingApproval) && plan.reconnectReason) {
+      scheduleReconnect(retryAwaitingApproval ? nextStatus : plan.reconnectReason, { operatorOnly: retryAwaitingApproval });
+    }
   }
 
   function handleGatewayMessage(ws: GatewayTransport, msg: GatewayMessage) {
@@ -3224,7 +3244,8 @@ export function App() {
     }
     if (showCheckAgain) {
       if (showOperatorApprovalCheck) {
-        reconnectGatewayNow("checking operator approval");
+        if (retryOperatorApprovalNow("checking operator approval")) return;
+        checkGatewayStatus();
         return;
       }
       checkGatewayStatus();

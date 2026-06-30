@@ -9,6 +9,7 @@ import { errorStack } from "./strict-helpers.ts";
 
 export type ParsedArgs = {
   agent: string;
+  gatewayUrl: string;
   message: string;
   openclawContainer: string;
   openclawProfile: string;
@@ -22,6 +23,8 @@ export type AgentCommandEvidence = {
   exitCode: number | null;
   json: unknown[];
   ok: boolean;
+  rawJson?: unknown[];
+  rawStdout?: string;
   stderr: string;
   stdout: string;
   timedOut: boolean;
@@ -34,6 +37,7 @@ export type OnboardingCheck = {
 };
 
 const DEFAULT_OUT_ROOT = path.join(process.cwd(), ".openclaw-even-g2-node", "onboarding-agent-runs");
+const DEFAULT_GATEWAY_URL = process.env.EVENG2_E2E_GATEWAY_URL || "";
 const DEFAULT_OPENCLAW_CONTAINER = process.env.EVENG2_E2E_OPENCLAW_CONTAINER || "";
 const DEFAULT_OPENCLAW_PROFILE = process.env.EVENG2_E2E_OPENCLAW_PROFILE || "";
 const DEFAULT_TIMEOUT_SECONDS = 180;
@@ -45,6 +49,7 @@ Usage:
 
 Options:
   --out-dir <path>          Output directory. Default: .openclaw-even-g2-node/onboarding-agent-runs/<timestamp>
+  --gateway-url <url>       Expected host-reachable Gateway URL in the setup QR. Default: EVENG2_E2E_GATEWAY_URL
   --openclaw-container <n>  OpenClaw container name for isolated Gateway Agent execution. Default: EVENG2_E2E_OPENCLAW_CONTAINER
   --openclaw-profile <name> OpenClaw CLI profile for host Agent execution. Default: EVENG2_E2E_OPENCLAW_PROFILE or current CLI profile
   --agent <id>              Agent id. Default: main
@@ -72,9 +77,11 @@ function readPositiveInteger(value: string, flag: string) {
 
 export function parseArgs(argv: string[], now = new Date()): ParsedArgs {
   const timestamp = timestampSlug(now);
+  let messageWasSet = false;
   const args: ParsedArgs = {
     agent: "main",
-    message: setupOpenClawAskRequest(),
+    gatewayUrl: DEFAULT_GATEWAY_URL,
+    message: "",
     openclawContainer: DEFAULT_OPENCLAW_CONTAINER,
     openclawProfile: DEFAULT_OPENCLAW_PROFILE,
     outDir: path.join(DEFAULT_OUT_ROOT, timestamp),
@@ -89,6 +96,9 @@ export function parseArgs(argv: string[], now = new Date()): ParsedArgs {
     } else if (arg === "--out-dir") {
       args.outDir = path.resolve(readFlagValue(argv, index, arg));
       index += 1;
+    } else if (arg === "--gateway-url") {
+      args.gatewayUrl = readFlagValue(argv, index, arg).trim();
+      index += 1;
     } else if (arg === "--openclaw-container") {
       args.openclawContainer = readFlagValue(argv, index, arg);
       index += 1;
@@ -100,6 +110,7 @@ export function parseArgs(argv: string[], now = new Date()): ParsedArgs {
       index += 1;
     } else if (arg === "--message") {
       args.message = readFlagValue(argv, index, arg);
+      messageWasSet = true;
       index += 1;
     } else if (arg === "--session-key") {
       args.sessionKey = readFlagValue(argv, index, arg);
@@ -115,6 +126,9 @@ export function parseArgs(argv: string[], now = new Date()): ParsedArgs {
     }
   }
 
+  if (!messageWasSet) {
+    args.message = setupOpenClawAskRequest();
+  }
   if (!args.sessionKey) {
     args.sessionKey = `agent:${args.agent}:eveng2-onboarding-smoke-${timestamp}`;
   }
@@ -206,18 +220,107 @@ function normalizeText(value: string) {
   return value.toLowerCase().replace(/\s+/g, " ").trim();
 }
 
-function looksLikePromptEcho(responseText: string) {
-  const normalized = normalizeText(responseText);
-  const prompt = normalizeText(setupOpenClawAskRequest());
-  if (!normalized || !prompt) return false;
-  if (normalized === prompt) return true;
-  const withoutCommonPrefix = normalized.replace(/^(?:prompt|input|user|message|request|submitted prompt)\s*[:>-]\s*/, "");
-  return withoutCommonPrefix === prompt;
+function promptEchoCandidates(promptText: string) {
+  return [...new Set([promptText, redactText(promptText)].map(normalizeText).filter(Boolean))];
 }
 
-export function agentOnboardingVerdict(command: AgentCommandEvidence, responseText: string) {
+function looksLikePromptEcho(responseText: string, promptText = setupOpenClawAskRequest()) {
   const normalized = normalizeText(responseText);
-  const promptEcho = looksLikePromptEcho(responseText);
+  const prompts = promptEchoCandidates(promptText);
+  if (!normalized || prompts.length === 0) return false;
+  if (prompts.includes(normalized)) return true;
+  const withoutCommonPrefix = normalized.replace(/^(?:prompt|input|user|message|request|submitted prompt)\s*[:>-]\s*/, "");
+  return prompts.includes(withoutCommonPrefix);
+}
+
+function trimUrlCandidate(value: string) {
+  return value.replace(/[),.;]+$/g, "");
+}
+
+function normalizeRedactedUrlPlaceholders(value: string) {
+  return value.replace(/<redacted>/gi, "redacted");
+}
+
+function urlCandidatesFromText(value: string) {
+  return (normalizeRedactedUrlPlaceholders(value).match(/\bwss?:\/\/[^\s"'<>`[\]()]+/gi) || []).map(trimUrlCandidate);
+}
+
+function sameGatewayUrl(candidate: URL, target: URL) {
+  return candidate.protocol.toLowerCase() === target.protocol.toLowerCase() &&
+    candidate.hostname.toLowerCase() === target.hostname.toLowerCase() &&
+    candidate.port === target.port &&
+    candidate.username === target.username &&
+    candidate.password === target.password &&
+    candidate.pathname === target.pathname &&
+    candidate.search === target.search;
+}
+
+function gatewayUrlTargets(gatewayUrl: string) {
+  const urls: URL[] = [];
+  const seen = new Set<string>();
+  for (const value of [gatewayUrl].map(normalizeRedactedUrlPlaceholders)) {
+    try {
+      const url = new URL(value);
+      url.hash = "";
+      if (!seen.has(url.href)) {
+        seen.add(url.href);
+        urls.push(url);
+      }
+    } catch {
+      // Non-URL gateway inputs are handled by the caller's string fallback.
+    }
+  }
+  return urls;
+}
+
+function includesGatewayTarget(responseText: string, gatewayUrl: string) {
+  const trimmed = gatewayUrl.trim();
+  if (!trimmed) return true;
+  const targets = gatewayUrlTargets(trimmed);
+  if (targets.length === 0) {
+    return responseText.includes(trimmed);
+  }
+  for (const candidateText of urlCandidatesFromText(responseText)) {
+    try {
+      const candidate = new URL(candidateText);
+      candidate.hash = "";
+      if (targets.some((target) => sameGatewayUrl(candidate, target))) return true;
+    } catch {
+      // Ignore non-URL text that matched the loose URL pattern.
+    }
+  }
+  return false;
+}
+
+function isContainerBridgeAddress(hostname: string) {
+  return /^172\.(?:1[6-9]|2\d|3[0-1])\.\d{1,3}\.\d{1,3}$/.test(hostname);
+}
+
+function containsUnexpectedContainerBridgeAddress(responseText: string, gatewayUrl: string) {
+  let uncheckedText = normalizeRedactedUrlPlaceholders(responseText);
+  const targets = gatewayUrlTargets(gatewayUrl.trim());
+  for (const candidateText of urlCandidatesFromText(responseText)) {
+    try {
+      const candidate = new URL(candidateText);
+      candidate.hash = "";
+      if (!isContainerBridgeAddress(candidate.hostname)) continue;
+      if (!targets.some((target) => sameGatewayUrl(candidate, target))) return true;
+      uncheckedText = uncheckedText.replace(candidateText, "");
+    } catch {
+      // Keep malformed URL-looking text in the bare address scan below.
+    }
+  }
+  return /\b172\.(?:1[6-9]|2\d|3[0-1])\.\d{1,3}\.\d{1,3}\b/.test(uncheckedText);
+}
+
+export function agentOnboardingVerdict(
+  command: AgentCommandEvidence,
+  responseText: string,
+  options: { gatewayUrl?: string; promptText?: string } = {},
+) {
+  const normalized = normalizeText(responseText);
+  const promptEcho = looksLikePromptEcho(responseText, options.promptText);
+  const gatewayUrl = options.gatewayUrl?.trim() || "";
   const checks: OnboardingCheck[] = [
     {
       name: "agent-command-exit",
@@ -248,6 +351,20 @@ export function agentOnboardingVerdict(command: AgentCommandEvidence, responseTe
       ok: /openclaw|open claw|\bclaw\b/.test(normalized),
       detail: "response should route the user through OpenClaw, not a generic QR flow",
     },
+    ...(gatewayUrl
+      ? [
+        {
+          name: "host-gateway-url",
+          ok: includesGatewayTarget(responseText, gatewayUrl),
+          detail: `response should preserve the host-reachable Gateway URL ${redactText(gatewayUrl)}`,
+        },
+        {
+          name: "no-container-bridge-url",
+          ok: !containsUnexpectedContainerBridgeAddress(responseText, gatewayUrl),
+          detail: "response should not expose Docker bridge URLs that the phone cannot reach",
+        },
+      ]
+      : []),
   ];
   return {
     checks,
@@ -281,13 +398,17 @@ function runAgentCommand(args: ParsedArgs): AgentCommandEvidence {
     stdio: ["ignore", "pipe", "pipe"],
     timeout: (args.timeoutSeconds + 5) * 1_000,
   });
-  const stdout = redactText(result.stdout || "");
+  const rawStdout = result.stdout || "";
+  const rawJson = parseAgentJsonOutput(rawStdout);
+  const stdout = redactText(rawStdout);
   const stderr = redactText(result.stderr || result.error?.message || "");
   return {
     args: redactCommandArgs(["openclaw", ...commandArgs]),
     exitCode: result.status,
     json: parseAgentJsonOutput(stdout),
     ok: result.status === 0,
+    rawJson,
+    rawStdout,
     stderr,
     stdout,
     timedOut: Boolean(result.error && "code" in result.error && result.error.code === "ETIMEDOUT"),
@@ -351,8 +472,12 @@ async function main() {
   fs.mkdirSync(args.outDir, { recursive: true });
 
   const command = runAgentCommand(args);
-  const responseText = extractAgentResponseText(command.stdout, command.json);
-  const verdict = agentOnboardingVerdict(command, responseText);
+  const rawResponseText = extractAgentResponseText(command.rawStdout ?? command.stdout, command.rawJson ?? command.json);
+  const responseText = redactText(rawResponseText);
+  const verdict = agentOnboardingVerdict(command, rawResponseText, {
+    gatewayUrl: args.gatewayUrl,
+    promptText: args.message,
+  });
   const evidencePath = path.join(args.outDir, "evidence.json");
   const manifestPath = path.join(args.outDir, "manifest.json");
   const reportPath = path.join(args.outDir, "report.md");
@@ -361,6 +486,7 @@ async function main() {
     command,
     prompt: {
       askOpenClawWith: args.message,
+      gatewayUrl: args.gatewayUrl || null,
       source: "src/openclaw-ask-requests.ts setupOpenClawAskRequest(), consumed by setupHudFrame()",
     },
     responseText,

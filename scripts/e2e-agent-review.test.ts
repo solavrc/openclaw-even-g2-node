@@ -56,18 +56,23 @@ describe("e2e agent review helpers", () => {
       url: "ws://127.0.0.1:19001",
       bootstrapToken: "secret-bootstrap-token",
     })).toString("base64url");
-    const redacted = redactText(`Bearer abc.def setupCode=wss%3A%2F%2Fgateway.example%2Fws%3Ftoken%3Dsecret token=plain url=ws://gateway.example/ws?bootstrap=one&setup_token=two\n${setupCode}`);
+    const redacted = redactText(`Bearer abc.def setupCode=wss%3A%2F%2Fgateway.example%2Fws%3Ftoken%3Dsecret token=plain url=ws://gateway.example/ws?bootstrap=one&setup_token=two&secret=three&password=four\n${setupCode}`);
 
     expect(redacted).toContain("Bearer <redacted>");
     expect(redacted).toContain("setupCode=<redacted>");
     expect(redacted).toContain("token=<redacted>");
     expect(redacted).toContain("bootstrap=<redacted>");
     expect(redacted).toContain("setup_token=<redacted>");
+    expect(redacted).toContain("secret=<redacted>");
+    expect(redacted).toContain("password=<redacted>");
     expect(redacted).toContain("<redacted-setup-code>");
     expect(redacted).not.toContain("abc.def");
-    expect(redacted).not.toContain("secret");
+    expect(redacted).not.toContain("secret-bootstrap-token");
+    expect(redacted).not.toContain("plain");
     expect(redacted).not.toContain("one");
     expect(redacted).not.toContain("two");
+    expect(redacted).not.toContain("three");
+    expect(redacted).not.toContain("four");
     expect(redacted).not.toContain(setupCode);
   });
 

@@ -118,7 +118,12 @@ function lastConnectParams(ws: FakeGatewayWebSocket) {
     }
   }
   if (!raw) throw new Error("No connect frame was sent.");
-  return JSON.parse(raw) as { params?: { client?: { id?: string } } };
+  return JSON.parse(raw) as { params?: { auth?: unknown; client?: { id?: string }; device?: { signature?: string } } };
+}
+
+function setOpenOperatorSession(gateway: GatewayDirectTransport, session: unknown) {
+  Reflect.set(gateway, "operatorSession", session);
+  Reflect.set(gateway, "operatorSessionOpen", true);
 }
 
 describe("Gateway direct setup", () => {
@@ -253,13 +258,13 @@ describe("Gateway direct setup", () => {
     expect(params.device.signature).toContain("v3|device-1|openclaw-even-g2-node|node|node|node.register|1700000000000|shared-token|nonce|even-g2|glasses");
   });
 
-  it("prefers a fresh bootstrap setup token over a stale node device token", async () => {
+  it("prefers a stored node device token over setup bootstrap when pairing is already approved", async () => {
     vi.spyOn(Date, "now").mockReturnValue(1700000000000);
     const params = await buildConnectParams({
       identity,
       nonce: "nonce",
       storedAuth: {
-        token: "stale-device-token",
+        token: "stored-device-token",
         role: "node",
         scopes: ["node.invoke"],
         updatedAtMs: 1,
@@ -281,11 +286,11 @@ describe("Gateway direct setup", () => {
       },
     });
 
-    expect(params.auth).toEqual({ bootstrapToken: "fresh-bootstrap" });
-    expect(params.device.signature).toContain("v3|device-1|openclaw-even-g2-node|node|node||1700000000000|fresh-bootstrap|nonce|even-g2|glasses");
+    expect(params.auth).toEqual({ token: "stored-device-token" });
+    expect(params.device.signature).toContain("v3|device-1|openclaw-even-g2-node|node|node||1700000000000|stored-device-token|nonce|even-g2|glasses");
   });
 
-  it("prefers a fresh bootstrap setup token over a stale operator device token", async () => {
+  it("prefers a stored operator device token over setup bootstrap when pairing is already approved", async () => {
     vi.spyOn(Date, "now").mockReturnValue(1700000000000);
     const params = await buildConnectParams({
       identity,
@@ -313,8 +318,8 @@ describe("Gateway direct setup", () => {
       },
     });
 
-    expect(params.auth).toEqual({ bootstrapToken: "fresh-bootstrap" });
-    expect(params.device.signature).toContain("v3|device-1|openclaw-even-g2-node|ui|operator|operator.read|1700000000000|fresh-bootstrap|nonce|even-g2|glasses");
+    expect(params.auth).toEqual({ token: "stored-operator-token" });
+    expect(params.device.signature).toContain("v3|device-1|openclaw-even-g2-node|ui|operator|operator.read|1700000000000|stored-operator-token|nonce|even-g2|glasses");
   });
 
   it("clears stored browser device credentials during local pairing reset", () => {
@@ -343,6 +348,23 @@ describe("Gateway direct setup", () => {
     });
     expect(authStore.load("device-1", "node", "wss://gateway-a.example.test/ws?tenant=beta")).toBeNull();
     expect(authStore.load("device-1", "node", "wss://gateway-b.example.test/ws")).toBeNull();
+  });
+
+  it("removes only the rejected stored token for the current Gateway URL and role", () => {
+    const authStore = new BrowserDeviceAuthStore(new MemoryStorage());
+    authStore.save("device-1", "node", "node-token", [], "wss://gateway.example.test/ws?setup=secret");
+    authStore.save("device-1", "operator", "operator-token", ["operator.read"], "wss://gateway.example.test/ws?setup=secret");
+    authStore.save("device-1", "node", "other-token", [], "wss://other.example.test/ws");
+
+    authStore.remove("device-1", "node", "wss://gateway.example.test/ws");
+
+    expect(authStore.load("device-1", "node", "wss://gateway.example.test/ws")).toBeNull();
+    expect(authStore.load("device-1", "operator", "wss://gateway.example.test/ws")).toMatchObject({
+      token: "operator-token",
+    });
+    expect(authStore.load("device-1", "node", "wss://other.example.test/ws")).toMatchObject({
+      token: "other-token",
+    });
   });
 
   it("requests current scopes when reconnecting with a stored device token", async () => {
@@ -479,6 +501,271 @@ describe("Gateway session events", () => {
       error: "too many failed authentication attempts",
       pauseReconnect: true,
     }));
+  });
+
+  it("propagates details-code auth pauses so the app backs off reconnects", async () => {
+    vi.spyOn(Date, "now").mockReturnValue(1700000000000);
+    const messages: Array<Record<string, unknown>> = [];
+    const transport = new GatewayDirectTransport({
+      setupCodeOrUrl: encodeSetupCode({
+        url: "wss://gateway.example.test",
+        bootstrapToken: "bootstrap",
+      }),
+      WebSocketCtor: FakeGatewayWebSocketCtor,
+    });
+    transport.addEventListener("message", (event) => {
+      messages.push(JSON.parse(String((event as MessageEvent).data)) as Record<string, unknown>);
+    });
+
+    transport.connect();
+    await vi.waitFor(() => expect(FakeGatewayWebSocket.instances).toHaveLength(1));
+    const ws = FakeGatewayWebSocket.instances[0]!;
+    ws.receive({ type: "event", event: "connect.challenge", payload: { nonce: "nonce-1" } });
+    await vi.waitFor(() => expect(lastConnectParams(ws).params?.client?.id).toBe("openclaw-even-g2-node"));
+    ws.receive({
+      type: "res",
+      id: "__connect__",
+      ok: false,
+      error: {
+        code: "unauthorized",
+        message: "authentication paused",
+        details: { code: "auth_paused" },
+      },
+    });
+
+    await vi.waitFor(() => expect(messages).toContainEqual({
+      type: "error",
+      error: "authentication paused",
+      pauseReconnect: true,
+    }));
+  });
+
+  it("does not retry bootstrap when an auth pause is reported in details code", async () => {
+    vi.spyOn(Date, "now").mockReturnValue(1700000000000);
+    const storage = new MemoryStorage();
+    const authStore = new BrowserDeviceAuthStore(storage);
+    const errors: Error[] = [];
+    authStore.save(identity.deviceId, "node", "stored-device-token", [], "wss://gateway.example.test");
+    const session = new GatewayWsSession({
+      url: "wss://gateway.example.test",
+      bootstrapToken: "fresh-bootstrap",
+      role: "node",
+      scopes: [],
+      caps: ["device"],
+      commands: ["device.status"],
+      client: buildEvenG2ClientInfo("node", "inst-1"),
+      userAgent: "test",
+      WebSocketCtor: FakeGatewayWebSocketCtor,
+      identityStore: {
+        loadOrCreate: async () => identity,
+        sign: async (payload: string) => `sig:${payload}`,
+      },
+      authStore,
+      onError: (error) => errors.push(error),
+    });
+
+    await session.connect();
+    const ws = FakeGatewayWebSocket.instances[0]!;
+    ws.receive({ type: "event", event: "connect.challenge", payload: { nonce: "nonce-1" } });
+    await vi.waitFor(() => expect(lastConnectParams(ws).params?.auth).toEqual({ token: "stored-device-token" }));
+
+    ws.receive({
+      type: "res",
+      id: "__connect__",
+      ok: false,
+      error: {
+        code: "unauthorized",
+        message: "authentication paused",
+        details: { code: "auth_paused" },
+      },
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(ws.sent.filter((item) => item.includes("\"method\":\"connect\""))).toHaveLength(1);
+    expect(errors[0]).toBeInstanceOf(GatewayConnectError);
+    expect((errors[0] as GatewayConnectError).gatewayError?.details?.code).toBe("auth_paused");
+  });
+
+  it("does not retry bootstrap when auth pause is reported by message or reason", async () => {
+    vi.spyOn(Date, "now").mockReturnValue(1700000000000);
+    const storage = new MemoryStorage();
+    const authStore = new BrowserDeviceAuthStore(storage);
+    authStore.save(identity.deviceId, "node", "stored-device-token", [], "wss://gateway.example.test");
+    const session = new GatewayWsSession({
+      url: "wss://gateway.example.test",
+      bootstrapToken: "fresh-bootstrap",
+      role: "node",
+      scopes: [],
+      caps: ["device"],
+      commands: ["device.status"],
+      client: buildEvenG2ClientInfo("node", "inst-1"),
+      userAgent: "test",
+      WebSocketCtor: FakeGatewayWebSocketCtor,
+      identityStore: {
+        loadOrCreate: async () => identity,
+        sign: async (payload: string) => `sig:${payload}`,
+      },
+      authStore,
+    });
+
+    await session.connect();
+    const ws = FakeGatewayWebSocket.instances[0]!;
+    ws.receive({ type: "event", event: "connect.challenge", payload: { nonce: "nonce-1" } });
+    await vi.waitFor(() => expect(lastConnectParams(ws).params?.auth).toEqual({ token: "stored-device-token" }));
+
+    ws.receive({
+      type: "res",
+      id: "__connect__",
+      ok: false,
+      error: {
+        code: "unauthorized",
+        message: "authentication paused",
+        details: { reason: "authentication paused" },
+      },
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(ws.sent.filter((item) => item.includes("\"method\":\"connect\""))).toHaveLength(1);
+  });
+
+  it("falls back to setup bootstrap once when a stored device token is rejected", async () => {
+    vi.spyOn(Date, "now").mockReturnValue(1700000000000);
+    const storage = new MemoryStorage();
+    const authStore = new BrowserDeviceAuthStore(storage);
+    authStore.save(identity.deviceId, "node", "stored-device-token", [], "wss://gateway.example.test");
+    const session = new GatewayWsSession({
+      url: "wss://gateway.example.test",
+      bootstrapToken: "fresh-bootstrap",
+      role: "node",
+      scopes: [],
+      caps: ["device"],
+      commands: ["device.status"],
+      client: buildEvenG2ClientInfo("node", "inst-1"),
+      userAgent: "test",
+      WebSocketCtor: FakeGatewayWebSocketCtor,
+      identityStore: {
+        loadOrCreate: async () => identity,
+        sign: async (payload: string) => `sig:${payload}`,
+      },
+      authStore,
+    });
+
+    await session.connect();
+    const ws = FakeGatewayWebSocket.instances[0]!;
+    ws.receive({ type: "event", event: "connect.challenge", payload: { nonce: "nonce-1" } });
+    await vi.waitFor(() => expect(lastConnectParams(ws).params?.auth).toEqual({ token: "stored-device-token" }));
+
+    ws.receive({
+      type: "res",
+      id: "__connect__",
+      ok: false,
+      error: {
+        code: "unauthorized",
+        message: "device token revoked",
+      },
+    });
+
+    await vi.waitFor(() => {
+      expect(ws.sent.filter((item) => item.includes("\"method\":\"connect\""))).toHaveLength(2);
+    });
+    const retry = lastConnectParams(ws);
+    expect(retry.params?.auth).toEqual({ bootstrapToken: "fresh-bootstrap" });
+    expect(retry.params?.device?.signature).toContain("v3|device-1|openclaw-even-g2-node|node|node||1700000000000|fresh-bootstrap|nonce-1|even-g2|glasses");
+    expect(authStore.load(identity.deviceId, "node", "wss://gateway.example.test")).toBeNull();
+  });
+
+  it("falls back to setup bootstrap for approval pauses from rejected stored tokens", async () => {
+    vi.spyOn(Date, "now").mockReturnValue(1700000000000);
+    const storage = new MemoryStorage();
+    const authStore = new BrowserDeviceAuthStore(storage);
+    authStore.save(identity.deviceId, "node", "stored-device-token", [], "wss://gateway.example.test");
+    const session = new GatewayWsSession({
+      url: "wss://gateway.example.test",
+      bootstrapToken: "fresh-bootstrap",
+      role: "node",
+      scopes: [],
+      caps: ["device"],
+      commands: ["device.status"],
+      client: buildEvenG2ClientInfo("node", "inst-1"),
+      userAgent: "test",
+      WebSocketCtor: FakeGatewayWebSocketCtor,
+      identityStore: {
+        loadOrCreate: async () => identity,
+        sign: async (payload: string) => `sig:${payload}`,
+      },
+      authStore,
+    });
+
+    await session.connect();
+    const ws = FakeGatewayWebSocket.instances[0]!;
+    ws.receive({ type: "event", event: "connect.challenge", payload: { nonce: "nonce-1" } });
+    await vi.waitFor(() => expect(lastConnectParams(ws).params?.auth).toEqual({ token: "stored-device-token" }));
+
+    ws.receive({
+      type: "res",
+      id: "__connect__",
+      ok: false,
+      error: {
+        code: "approval_required",
+        message: "higher role than currently approved",
+        details: {
+          pauseReconnect: true,
+          reason: "approval required",
+        },
+      },
+    });
+
+    await vi.waitFor(() => {
+      expect(ws.sent.filter((item) => item.includes("\"method\":\"connect\""))).toHaveLength(2);
+    });
+    expect(lastConnectParams(ws).params?.auth).toEqual({ bootstrapToken: "fresh-bootstrap" });
+    expect(authStore.load(identity.deviceId, "node", "wss://gateway.example.test")).toBeNull();
+  });
+
+  it("falls back to setup bootstrap when stored operator tokens need a role upgrade", async () => {
+    vi.spyOn(Date, "now").mockReturnValue(1700000000000);
+    const storage = new MemoryStorage();
+    const authStore = new BrowserDeviceAuthStore(storage);
+    authStore.save(identity.deviceId, "operator", "stored-operator-token", ["operator.read"], "wss://gateway.example.test");
+    const session = new GatewayWsSession({
+      url: "wss://gateway.example.test",
+      bootstrapToken: "fresh-bootstrap",
+      role: "operator",
+      scopes: ["operator.approvals", "operator.read", "operator.write"],
+      caps: [],
+      commands: [],
+      client: buildEvenG2ClientInfo("ui", "inst-1"),
+      userAgent: "test",
+      WebSocketCtor: FakeGatewayWebSocketCtor,
+      identityStore: {
+        loadOrCreate: async () => identity,
+        sign: async (payload: string) => `sig:${payload}`,
+      },
+      authStore,
+    });
+
+    await session.connect();
+    const ws = FakeGatewayWebSocket.instances[0]!;
+    ws.receive({ type: "event", event: "connect.challenge", payload: { nonce: "nonce-1" } });
+    await vi.waitFor(() => expect(lastConnectParams(ws).params?.auth).toEqual({ token: "stored-operator-token" }));
+
+    ws.receive({
+      type: "res",
+      id: "__connect__",
+      ok: false,
+      error: {
+        code: "unauthorized",
+        message: "higher role than currently approved",
+      },
+    });
+
+    await vi.waitFor(() => {
+      expect(ws.sent.filter((item) => item.includes("\"method\":\"connect\""))).toHaveLength(2);
+    });
+    expect(lastConnectParams(ws).params?.auth).toEqual({ bootstrapToken: "fresh-bootstrap" });
+    expect(authStore.load(identity.deviceId, "operator", "wss://gateway.example.test")).toBeNull();
   });
 
   it("ignores late node-open callbacks after the direct transport closes", async () => {
@@ -761,7 +1048,7 @@ describe("Gateway direct transcript history", () => {
     gateway.addEventListener("message", (event) => {
       messages.push(JSON.parse((event as MessageEvent).data as string) as Record<string, unknown>);
     });
-    Reflect.set(gateway, "operatorSession", { request });
+    setOpenOperatorSession(gateway, { request });
     Reflect.set(gateway, "nodeApprovalPending", true);
 
     const refreshNodeApprovalStatus = Reflect.get(gateway, "refreshNodeApprovalStatus");
@@ -810,7 +1097,7 @@ describe("Gateway direct transcript history", () => {
     gateway.addEventListener("message", (event) => {
       messages.push(JSON.parse((event as MessageEvent).data as string) as Record<string, unknown>);
     });
-    Reflect.set(gateway, "operatorSession", { request });
+    setOpenOperatorSession(gateway, { request });
     Reflect.set(gateway, "nodeApprovalPending", true);
 
     const refreshNodeApprovalStatus = Reflect.get(gateway, "refreshNodeApprovalStatus");
@@ -863,7 +1150,7 @@ describe("Gateway direct transcript history", () => {
     gateway.addEventListener("message", (event) => {
       messages.push(JSON.parse((event as MessageEvent).data as string) as Record<string, unknown>);
     });
-    Reflect.set(gateway, "operatorSession", { request });
+    setOpenOperatorSession(gateway, { request });
     Reflect.set(gateway, "connectedDeviceId", "device-current");
     Reflect.set(gateway, "nodeApprovalPending", true);
 
@@ -912,7 +1199,7 @@ describe("Gateway direct transcript history", () => {
     gateway.addEventListener("message", (event) => {
       messages.push(JSON.parse((event as MessageEvent).data as string) as Record<string, unknown>);
     });
-    Reflect.set(gateway, "operatorSession", { request });
+    setOpenOperatorSession(gateway, { request });
     Reflect.set(gateway, "connectedDeviceId", "device-current");
 
     const refreshNodeApprovalStatus = Reflect.get(gateway, "refreshNodeApprovalStatus");
@@ -966,7 +1253,7 @@ describe("Gateway direct transcript history", () => {
     gateway.addEventListener("message", (event) => {
       messages.push(JSON.parse((event as MessageEvent).data as string) as Record<string, unknown>);
     });
-    Reflect.set(gateway, "operatorSession", { request });
+    setOpenOperatorSession(gateway, { request });
     Reflect.set(gateway, "connectedDeviceId", "device-current");
 
     const refreshNodeApprovalStatus = Reflect.get(gateway, "refreshNodeApprovalStatus");
@@ -1024,7 +1311,7 @@ describe("Gateway direct transcript history", () => {
     gateway.addEventListener("message", (event) => {
       messages.push(JSON.parse((event as MessageEvent).data as string) as Record<string, unknown>);
     });
-    Reflect.set(gateway, "operatorSession", { request });
+    setOpenOperatorSession(gateway, { request });
     Reflect.set(gateway, "connectedDeviceId", "device-current");
 
     const refreshNodeApprovalStatus = Reflect.get(gateway, "refreshNodeApprovalStatus");
@@ -1083,7 +1370,7 @@ describe("Gateway direct transcript history", () => {
     gateway.addEventListener("message", (event) => {
       messages.push(JSON.parse((event as MessageEvent).data as string) as Record<string, unknown>);
     });
-    Reflect.set(gateway, "operatorSession", { request });
+    setOpenOperatorSession(gateway, { request });
     Reflect.set(gateway, "connectedDeviceId", "device-current");
 
     const refreshNodeApprovalStatus = Reflect.get(gateway, "refreshNodeApprovalStatus");
@@ -1127,7 +1414,7 @@ describe("Gateway direct transcript history", () => {
     gateway.addEventListener("message", (event) => {
       messages.push(JSON.parse((event as MessageEvent).data as string) as Record<string, unknown>);
     });
-    Reflect.set(gateway, "operatorSession", { request });
+    setOpenOperatorSession(gateway, { request });
     Reflect.set(gateway, "connectedDeviceId", "device-current");
 
     const refreshNodeApprovalStatus = Reflect.get(gateway, "refreshNodeApprovalStatus");
@@ -1172,7 +1459,7 @@ describe("Gateway direct transcript history", () => {
     gateway.addEventListener("message", (event) => {
       messages.push(JSON.parse((event as MessageEvent).data as string) as Record<string, unknown>);
     });
-    Reflect.set(gateway, "operatorSession", { request });
+    setOpenOperatorSession(gateway, { request });
     Reflect.set(gateway, "connectedDeviceId", "device-current");
 
     const refreshNodeApprovalStatus = Reflect.get(gateway, "refreshNodeApprovalStatus");
@@ -1216,7 +1503,7 @@ describe("Gateway direct transcript history", () => {
     gateway.addEventListener("message", (event) => {
       messages.push(JSON.parse((event as MessageEvent).data as string) as Record<string, unknown>);
     });
-    Reflect.set(gateway, "operatorSession", { request });
+    setOpenOperatorSession(gateway, { request });
     Reflect.set(gateway, "connectedDeviceId", "device-current");
     Reflect.set(gateway, "nodeApprovalPending", true);
 
@@ -1271,7 +1558,7 @@ describe("Gateway direct transcript history", () => {
     gateway.addEventListener("message", (event) => {
       messages.push(JSON.parse((event as MessageEvent).data as string) as Record<string, unknown>);
     });
-    Reflect.set(gateway, "operatorSession", { request });
+    setOpenOperatorSession(gateway, { request });
     Reflect.set(gateway, "connectedDeviceId", "device-current");
 
     const refreshNodeApprovalStatus = Reflect.get(gateway, "refreshNodeApprovalStatus");
@@ -1337,7 +1624,7 @@ describe("Gateway direct transcript history", () => {
     gateway.addEventListener("message", (event) => {
       messages.push(JSON.parse((event as MessageEvent).data as string) as Record<string, unknown>);
     });
-    Reflect.set(gateway, "operatorSession", { request });
+    setOpenOperatorSession(gateway, { request });
     Reflect.set(gateway, "connectedDeviceId", "device-current");
 
     const refreshNodeApprovalStatus = Reflect.get(gateway, "refreshNodeApprovalStatus");
@@ -1399,7 +1686,7 @@ describe("Gateway direct transcript history", () => {
     gateway.addEventListener("message", (event) => {
       messages.push(JSON.parse((event as MessageEvent).data as string) as Record<string, unknown>);
     });
-    Reflect.set(gateway, "operatorSession", { request });
+    setOpenOperatorSession(gateway, { request });
     Reflect.set(gateway, "connectedDeviceId", "device-current");
     Reflect.set(gateway, "nodeApprovalPending", true);
 
@@ -1448,7 +1735,7 @@ describe("Gateway direct transcript history", () => {
     gateway.addEventListener("message", (event) => {
       messages.push(JSON.parse((event as MessageEvent).data as string) as Record<string, unknown>);
     });
-    Reflect.set(gateway, "operatorSession", { request });
+    setOpenOperatorSession(gateway, { request });
     Reflect.set(gateway, "connectedDeviceId", "device-current");
     Reflect.set(gateway, "nodeApprovalPending", true);
 
@@ -1487,7 +1774,7 @@ describe("Gateway direct transcript history", () => {
     gateway.addEventListener("message", (event) => {
       messages.push(JSON.parse((event as MessageEvent).data as string) as Record<string, unknown>);
     });
-    Reflect.set(gateway, "operatorSession", { request });
+    setOpenOperatorSession(gateway, { request });
     Reflect.set(gateway, "nodeApprovalPending", true);
 
     const refreshNodeApprovalStatus = Reflect.get(gateway, "refreshNodeApprovalStatus");
@@ -1533,7 +1820,7 @@ describe("Gateway direct transcript history", () => {
     gateway.addEventListener("message", (event) => {
       messages.push(JSON.parse((event as MessageEvent).data as string) as Record<string, unknown>);
     });
-    Reflect.set(gateway, "operatorSession", { request });
+    setOpenOperatorSession(gateway, { request });
     Reflect.set(gateway, "nodeApprovalPending", true);
 
     const refreshNodeApprovalStatus = Reflect.get(gateway, "refreshNodeApprovalStatus");
@@ -1580,7 +1867,7 @@ describe("Gateway direct transcript history", () => {
     gateway.addEventListener("message", (event) => {
       messages.push(JSON.parse((event as MessageEvent).data as string) as Record<string, unknown>);
     });
-    Reflect.set(gateway, "operatorSession", { request });
+    setOpenOperatorSession(gateway, { request });
     Reflect.set(gateway, "nodeApprovalPending", true);
 
     const handleAppCommand = Reflect.get(gateway, "handleAppCommand");
@@ -1604,7 +1891,7 @@ describe("Gateway direct transcript history", () => {
     gateway.addEventListener("message", (event) => {
       messages.push(JSON.parse((event as MessageEvent).data as string) as Record<string, unknown>);
     });
-    Reflect.set(gateway, "operatorSession", { request });
+    setOpenOperatorSession(gateway, { request });
     Reflect.set(gateway, "selectedSessionKey", "agent:main:main");
 
     const handleAppCommand = Reflect.get(gateway, "handleAppCommand");
@@ -1640,7 +1927,7 @@ describe("Gateway direct transcript history", () => {
     gateway.addEventListener("message", (event) => {
       messages.push(JSON.parse((event as MessageEvent).data as string) as Record<string, unknown>);
     });
-    Reflect.set(gateway, "operatorSession", { request });
+    setOpenOperatorSession(gateway, { request });
 
     const handleAppCommand = Reflect.get(gateway, "handleAppCommand");
     if (typeof handleAppCommand !== "function") throw new Error("GatewayDirectTransport.handleAppCommand is unavailable");
@@ -1675,7 +1962,7 @@ describe("Gateway direct transcript history", () => {
     gateway.addEventListener("message", (event) => {
       messages.push(JSON.parse((event as MessageEvent).data as string) as Record<string, unknown>);
     });
-    Reflect.set(gateway, "operatorSession", { request });
+    setOpenOperatorSession(gateway, { request });
 
     const handleAppCommand = Reflect.get(gateway, "handleAppCommand");
     if (typeof handleAppCommand !== "function") throw new Error("GatewayDirectTransport.handleAppCommand is unavailable");
@@ -1787,7 +2074,8 @@ describe("Gateway direct voice", () => {
       messages.push(JSON.parse((event as MessageEvent).data as string) as Record<string, unknown>);
     });
     Reflect.set(gateway, "nodeSessionOpen", true);
-    Reflect.set(gateway, "operatorSession", session);
+    Reflect.set(gateway, "readyState", gateway.OPEN);
+    setOpenOperatorSession(gateway, session);
 
     const handleOperatorSessionError = Reflect.get(gateway, "handleOperatorSessionError");
     if (typeof handleOperatorSessionError !== "function") throw new Error("GatewayDirectTransport.handleOperatorSessionError is unavailable");
@@ -1815,7 +2103,7 @@ describe("Gateway direct voice", () => {
       messages.push(JSON.parse((event as MessageEvent).data as string) as Record<string, unknown>);
     });
     Reflect.set(gateway, "nodeSessionOpen", true);
-    Reflect.set(gateway, "operatorSession", session);
+    setOpenOperatorSession(gateway, session);
 
     const handleOperatorSessionError = Reflect.get(gateway, "handleOperatorSessionError");
     if (typeof handleOperatorSessionError !== "function") throw new Error("GatewayDirectTransport.handleOperatorSessionError is unavailable");
@@ -1835,6 +2123,29 @@ describe("Gateway direct voice", () => {
     });
   });
 
+  it("retries operator approval without closing the live node session", async () => {
+    const gateway = new GatewayDirectTransport({
+      setupCodeOrUrl: "ws://127.0.0.1:18789",
+      storage: new MemoryStorage(),
+      token: "",
+      WebSocketCtor: FakeGatewayWebSocketCtor,
+    });
+    const nodeSession = { close: vi.fn() };
+    Reflect.set(gateway, "nodeSession", nodeSession);
+    Reflect.set(gateway, "nodeSessionOpen", true);
+    Reflect.set(gateway, "readyState", gateway.OPEN);
+    Reflect.set(gateway, "operatorSession", null);
+
+    expect(gateway.retryOperatorApproval()).toBe(true);
+
+    expect(gateway.readyState).toBe(gateway.CONNECTING);
+    expect(gateway.canSendNodeCommandResult()).toBe(true);
+    expect(nodeSession.close).not.toHaveBeenCalled();
+    expect(Reflect.get(gateway, "operatorSession")).not.toBeNull();
+    await expect(gateway.request("sessions.list")).rejects.toThrow("operator session is not connected");
+    await vi.waitFor(() => expect(FakeGatewayWebSocket.instances).toHaveLength(1));
+  });
+
   it("closes the transport after transient operator session errors so the app can reconnect", () => {
     const gateway = new GatewayDirectTransport({
       setupCodeOrUrl: "ws://127.0.0.1:18789",
@@ -1849,7 +2160,7 @@ describe("Gateway direct voice", () => {
     });
     Reflect.set(gateway, "nodeSessionOpen", true);
     Reflect.set(gateway, "nodeSession", { close: vi.fn() });
-    Reflect.set(gateway, "operatorSession", session);
+    setOpenOperatorSession(gateway, session);
 
     const handleOperatorSessionError = Reflect.get(gateway, "handleOperatorSessionError");
     if (typeof handleOperatorSessionError !== "function") throw new Error("GatewayDirectTransport.handleOperatorSessionError is unavailable");

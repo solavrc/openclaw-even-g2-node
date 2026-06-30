@@ -10,6 +10,7 @@ import {
   setupQrScanFailedHudFrame,
   setupQrScanPromptHudFrame,
   setupQrScannedHudFrame,
+  shouldRetryWhileAwaitingApproval,
 } from "./connection-guidance";
 
 describe("guidanceForConnectionState", () => {
@@ -34,6 +35,15 @@ describe("guidanceForConnectionState", () => {
     expect(guidance?.title).toBe("Operator approval required");
     expect(guidance?.action).toContain("$ openclaw devices list");
     expect(guidance?.action).toContain("Hey Claw, approve remaining Even G2 operator requests.");
+  });
+
+  it("treats generic approval-required errors as operator approval", () => {
+    const underscored = guidanceForConnectionState("error: approval_required", true);
+    const spaced = guidanceForConnectionState("error: approval required (requestId: request-1)", true);
+
+    expect(underscored?.title).toBe("Operator approval required");
+    expect(spaced?.title).toBe("Operator approval required");
+    expect(spaced?.action).toContain("$ openclaw devices approve request-1");
   });
 
   it("renders safe non-UUID operator approval request ids as host commands", () => {
@@ -85,6 +95,37 @@ describe("connectionErrorPresentationPlan", () => {
       },
       reconnectReason: "",
     });
+  });
+
+  it("allows automatic retry while waiting for approval but not auth pauses", () => {
+    const approvalPlan = connectionErrorPresentationPlan(
+      "error: higher role than currently approved",
+      "higher role than currently approved",
+      true,
+    );
+    const authPausePlan = connectionErrorPresentationPlan(
+      "error: too many failed authentication attempts",
+      "too many failed authentication attempts",
+      true,
+    );
+
+    expect(shouldRetryWhileAwaitingApproval(approvalPlan)).toBe(true);
+    expect(shouldRetryWhileAwaitingApproval(authPausePlan)).toBe(false);
+  });
+
+  it("allows automatic retry for generic approval-required pauses", () => {
+    const plan = connectionErrorPresentationPlan(
+      "error: approval_required",
+      "approval_required",
+      true,
+    );
+
+    expect(plan).toMatchObject({
+      target: "guidance",
+      guidance: { title: "Operator approval required" },
+      reconnectReason: "needs attention",
+    });
+    expect(shouldRetryWhileAwaitingApproval(plan)).toBe(true);
   });
 
   it("falls back to a glass error frame when no guidance matches", () => {
