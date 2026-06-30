@@ -498,6 +498,43 @@ describe("Gateway session events", () => {
     }));
   });
 
+  it("propagates details-code auth pauses so the app backs off reconnects", async () => {
+    vi.spyOn(Date, "now").mockReturnValue(1700000000000);
+    const messages: Array<Record<string, unknown>> = [];
+    const transport = new GatewayDirectTransport({
+      setupCodeOrUrl: encodeSetupCode({
+        url: "wss://gateway.example.test",
+        bootstrapToken: "bootstrap",
+      }),
+      WebSocketCtor: FakeGatewayWebSocketCtor,
+    });
+    transport.addEventListener("message", (event) => {
+      messages.push(JSON.parse(String((event as MessageEvent).data)) as Record<string, unknown>);
+    });
+
+    transport.connect();
+    await vi.waitFor(() => expect(FakeGatewayWebSocket.instances).toHaveLength(1));
+    const ws = FakeGatewayWebSocket.instances[0]!;
+    ws.receive({ type: "event", event: "connect.challenge", payload: { nonce: "nonce-1" } });
+    await vi.waitFor(() => expect(lastConnectParams(ws).params?.client?.id).toBe("openclaw-even-g2-node"));
+    ws.receive({
+      type: "res",
+      id: "__connect__",
+      ok: false,
+      error: {
+        code: "unauthorized",
+        message: "authentication paused",
+        details: { code: "auth_paused" },
+      },
+    });
+
+    await vi.waitFor(() => expect(messages).toContainEqual({
+      type: "error",
+      error: "authentication paused",
+      pauseReconnect: true,
+    }));
+  });
+
   it("does not retry bootstrap when an auth pause is reported in details code", async () => {
     vi.spyOn(Date, "now").mockReturnValue(1700000000000);
     const storage = new MemoryStorage();

@@ -27,11 +27,12 @@ describe("e2e onboarding agent smoke helpers", () => {
     expect(args.sessionKey).toBe("agent:main:eveng2-onboarding-smoke-2026-06-30T01-02-03-000Z");
   });
 
-  it("adds the host-reachable Gateway URL to isolated onboarding prompts", () => {
+  it("keeps the app's actual setup request when an expected Gateway URL is provided", () => {
     const args = parseArgs(["--gateway-url", "ws://127.0.0.1:19002"], new Date("2026-06-30T01:02:03.000Z"));
 
     expect(args.gatewayUrl).toBe("ws://127.0.0.1:19002");
-    expect(args.message).toBe(setupOpenClawAskRequest("ws://127.0.0.1:19002"));
+    expect(args.message).toBe(setupOpenClawAskRequest());
+    expect(args.message).not.toContain("ws://127.0.0.1:19002");
   });
 
   it("extracts assistant text from structured OpenClaw Agent JSON", () => {

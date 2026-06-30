@@ -664,7 +664,7 @@ export class GatewayWsSession {
     if (this.retriedStoredTokenFailureWithBootstrap || this.lastConnectAuthSource !== "device-token") return false;
     if (!this.lastConnectNonce) return false;
     if (!this.options.bootstrapToken?.trim()) return false;
-    if (error?.details?.pauseReconnect || error?.code === "auth_paused" || error?.details?.code === "auth_paused") return false;
+    if (gatewayErrorRequestsReconnectPause(error)) return false;
     const normalized = [
       error?.code,
       error?.message,
@@ -745,6 +745,10 @@ function shouldPauseOperatorReconnect(reason: string) {
     normalized.includes("role upgrade") ||
     normalized.includes("scope upgrade")
   );
+}
+
+function gatewayErrorRequestsReconnectPause(error?: GatewayErrorShape) {
+  return Boolean(error?.details?.pauseReconnect || error?.code === "auth_paused" || error?.details?.code === "auth_paused");
 }
 
 function makeTransportCloseEvent(reason = "") {
@@ -1558,7 +1562,7 @@ export class GatewayDirectTransport extends EventTarget {
       type: "error",
       error: error.message,
       ...(requestId ? { requestId } : {}),
-      ...(gatewayError?.details?.pauseReconnect ? { pauseReconnect: true } : {}),
+      ...(gatewayErrorRequestsReconnectPause(gatewayError) ? { pauseReconnect: true } : {}),
     });
   }
 
@@ -1567,7 +1571,7 @@ export class GatewayDirectTransport extends EventTarget {
     if (this.nodeSessionOpen) {
       const gatewayError = gatewayErrorFromConnectError(error);
       const requestId = requestIdFromGatewayError(gatewayError);
-      const pauseReconnect = Boolean(gatewayError?.details?.pauseReconnect) || shouldPauseOperatorReconnect(error.message);
+      const pauseReconnect = gatewayErrorRequestsReconnectPause(gatewayError) || shouldPauseOperatorReconnect(error.message);
       this.operatorSession = null;
       session.close();
       this.emit({

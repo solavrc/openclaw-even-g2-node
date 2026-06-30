@@ -47,7 +47,7 @@ Usage:
 
 Options:
   --out-dir <path>          Output directory. Default: .openclaw-even-g2-node/onboarding-agent-runs/<timestamp>
-  --gateway-url <url>       Host-reachable Gateway URL to request in the setup QR. Default: EVENG2_E2E_GATEWAY_URL
+  --gateway-url <url>       Expected host-reachable Gateway URL in the setup QR. Default: EVENG2_E2E_GATEWAY_URL
   --openclaw-container <n>  OpenClaw container name for isolated Gateway Agent execution. Default: EVENG2_E2E_OPENCLAW_CONTAINER
   --openclaw-profile <name> OpenClaw CLI profile for host Agent execution. Default: EVENG2_E2E_OPENCLAW_PROFILE or current CLI profile
   --agent <id>              Agent id. Default: main
@@ -125,7 +125,7 @@ export function parseArgs(argv: string[], now = new Date()): ParsedArgs {
   }
 
   if (!messageWasSet) {
-    args.message = setupOpenClawAskRequest(args.gatewayUrl);
+    args.message = setupOpenClawAskRequest();
   }
   if (!args.sessionKey) {
     args.sessionKey = `agent:${args.agent}:eveng2-onboarding-smoke-${timestamp}`;
