@@ -69,14 +69,30 @@ Long description:
 ```text
 OpenClaw Node connects G2 glasses to your private OpenClaw Gateway.
 
-The glasses become a compact OpenClaw surface: pick a session, read recent
-context, dictate a message, review transcript text before sending, approve
-requests, and receive OpenClaw text or image canvas updates.
+Use the glasses to pick an OpenClaw session, read recent context, dictate a
+message, review transcript text before sending, approve requests, and receive
+OpenClaw canvas text or image updates.
+
+The core idea is simple: keep OpenClaw ambient and glanceable. The glasses
+become the session, voice, approval, and canvas surface. The phone stays focused
+on setup, connection status, HUD preview, voice mode selection, recovery, and
+diagnostics.
 
 Voice input is routed through OpenClaw. Speech provider, model, subscription,
-OAuth, and API key choices stay in your Gateway configuration instead of inside
-the glasses app. The phone screen is limited to setup, connection status, HUD
-preview, voice mode selection, recovery controls, and diagnostics for support.
+OAuth, API key, transcription prompt, and media-understanding choices stay in
+your Gateway configuration instead of inside the glasses app.
+
+Configuration examples and setup references:
+
+- Review voice:
+  https://github.com/solavrc/openclaw-even-g2-node/blob/main/docs/gateway-voice-setup.md#review-mode
+- Send now voice:
+  https://github.com/solavrc/openclaw-even-g2-node/blob/main/docs/gateway-voice-setup.md#send-now-mode
+- First-run setup:
+  https://github.com/solavrc/openclaw-even-g2-node/blob/main/docs/user-guide.md#first-run
+
+Learn more:
+https://github.com/solavrc/openclaw-even-g2-node
 ```
 
 ## Permission Copy
