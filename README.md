@@ -149,6 +149,22 @@ Set up OpenClaw Even G2 Review voice. See solavrc/openclaw-even-g2-node.
 Set up OpenClaw Even G2 Send now voice. See solavrc/openclaw-even-g2-node.
 ```
 
+For the best `Review` experience today, start with xAI.
+[xAI's OpenClaw integration](https://x.com/xai/status/2056826183745253663)
+supports SuperGrok and X Premium subscription access, so many users can turn on
+glasses transcription without introducing a separate speech API account. In
+practice, xAI gives `Review` the product feel this app is built around: quick
+enough for short G2 voice turns, accurate enough to read before sending, and
+still routed through the user's private OpenClaw Gateway.
+
+`Review` transcription is separate from the Agent model you use for the
+session. Operators can keep a Codex/OpenAI harness for the main agent while
+using xAI only for the glasses transcription path. If your Gateway build hits
+the known OpenAI/xAI provider-resolution conflict, follow
+[openclaw/openclaw#97738](https://github.com/openclaw/openclaw/issues/97738)
+or use an OpenClaw build that includes the linked Voice Call provider-resolution
+fix before relying on xAI in daily use.
+
 For `Review`, the Agent or operator should verify that `talk.catalog` lists a
 usable Gateway-relay transcription provider:
 
