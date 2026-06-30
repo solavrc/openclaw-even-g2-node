@@ -249,6 +249,91 @@ pixel-perfect assertion. The goal is to let the agent compare simulator output,
 OpenClaw node state, and [user-stories.md](user-stories.md) with fuzzy product
 judgment.
 
+### Isolated Test Gateway
+
+Do not point live E2E development at a maintainer's everyday Gateway unless the
+test is explicitly checking that exact environment. Use the Docker-backed
+isolated Gateway helper when collecting live OpenClaw evidence so node pairing,
+Gateway auth, and transient test sessions stay out of the active `~/.openclaw`
+context.
+
+Preview the generated config and Docker command without starting anything:
+
+```bash
+pnpm e2e:gateway:plan
+```
+
+Start the isolated Gateway:
+
+```bash
+pnpm e2e:gateway:start
+```
+
+The helper writes generated state under
+`.openclaw-even-g2-node/isolated-gateway/<run-id>/`. It creates a new
+`state/openclaw.json` instead of copying the user's active config. The generated
+config is intentionally small:
+
+- `env.shellEnv.enabled=false` so login-shell imports do not hide missing
+  requirements;
+- `gateway.mode=local`, `gateway.bind=lan`, token auth via
+  `OPENCLAW_GATEWAY_TOKEN`, and the container Gateway port. The Gateway listens
+  on the container network so Docker port publishing works, while Docker
+  publishes it only to host loopback;
+- `gateway.controlUi.enabled=false` plus local dev/static origins;
+- `plugins.enabled=true`, with `plugins.allow` present only when `--plugin` is
+  passed;
+- `tools.profile=minimal`.
+
+By default the Docker container receives only the generated state directory as a
+writable `/home/node/.openclaw` mount. The helper may add these read-only binds
+when they exist:
+
+- `~/.openclaw/.env` to `/home/node/.openclaw/.env`;
+- the auth-profile secret directory to `/home/node/.config/openclaw`;
+- `~/.openclaw/agents/main/agent/openclaw-agent.sqlite*` and legacy auth JSON
+  files to the matching generated agent path.
+
+It does not bind the user's `~/.openclaw/openclaw.json`, active sessions, or
+workspace as writable container state. The container also sets
+`OPENCLAW_AUTH_STORE_READONLY=1`. Add extra read-only inputs only when a test
+really needs them:
+
+```bash
+pnpm e2e:gateway:start -- --readonly-bind ~/.openclaw/credentials:/home/node/.openclaw/credentials
+```
+
+For Review voice coverage, keep the base config minimal first. If the run
+reveals a real missing dependency, make it explicit with flags or docs rather
+than copying the maintainer config wholesale:
+
+```bash
+pnpm e2e:gateway:start -- --plugin voice-call --plugin xai
+```
+
+`start` prints `containerName`, `hostGatewayUrl`, `containerGatewayUrl`,
+`token`, and a setup-code result. Use the setup code with the app/simulator, and
+use the container URL for OpenClaw CLI evidence because `e2e:agent` executes the
+CLI inside the Gateway container:
+
+```bash
+pnpm dev
+pnpm simulator 'http://127.0.0.1:5174/?resetPairing=1&e2eLog=1&setupCode=<setup-code>' \
+  --automation-port 9898
+pnpm device:approve:latest -- --watch-ms 45000
+pnpm e2e:agent:live -- \
+  --openclaw-container <containerName> \
+  --openclaw-url <containerGatewayUrl> \
+  --openclaw-token <token> \
+  --node "<connected Even G2 nodeId>"
+```
+
+Stop the isolated Gateway when the run is finished:
+
+```bash
+pnpm e2e:gateway:stop
+```
+
 Start the app and simulator as usual. For production-build simulator runs where
 the agent needs structured HUD state logs, add `?e2eLog=1` to the app URL:
 
@@ -526,6 +611,9 @@ failure.
 | `pnpm e2e:agent` | Agentic local review | Collects simulator/OpenClaw evidence and writes a prompt for Coding Agent fuzzy review. |
 | `pnpm e2e:agent:live` | Agentic local review | Same as `e2e:agent`, but also invokes `canvas.present` on the active OpenClaw node. |
 | `pnpm e2e:agent:review:validate` | Agentic local review | Validates `llm-review.json` against the required fuzzy-review schema. |
+| `pnpm e2e:gateway:plan` | Agentic local review support | Writes the minimal isolated Gateway config and prints Docker/E2E commands without starting Docker. |
+| `pnpm e2e:gateway:start` | Agentic local review support | Starts the Docker-backed isolated OpenClaw Gateway with generated state and read-only auth inputs. |
+| `pnpm e2e:gateway:stop` | Agentic local review support | Stops isolated Gateway containers created by the helper. |
 | `pnpm run pack` | Packaging | Builds and writes `openclaw-even-g2-node.ehpk`. |
 | `pnpm release:check` | CI / release gate | Runs broad release checks; release status separately reports the runtime Gateway whitelist review risk. |
 | `pnpm release:bundle` | Release artifact | Creates the local release bundle directory and prints the full bundle manifest JSON. |
