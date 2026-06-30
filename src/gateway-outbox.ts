@@ -45,6 +45,10 @@ export function gatewayNodeCommandResultRequest(
   };
 }
 
+export function gatewayNodeApprovalRefreshRequest() {
+  return { type: "eveng2.node.approval.refresh" as const };
+}
+
 export function gatewayUtteranceStartRequest(config: Record<string, unknown>, utteranceId: string) {
   return {
     type: "utterance.start" as const,
@@ -65,6 +69,7 @@ export type GatewayOutboxRequest =
   | ReturnType<typeof gatewaySessionSendRequest>
   | ReturnType<typeof gatewayApprovalResolveRequest>
   | ReturnType<typeof gatewayNodeCommandResultRequest>
+  | ReturnType<typeof gatewayNodeApprovalRefreshRequest>
   | ReturnType<typeof gatewayUtteranceStartRequest>
   | ReturnType<typeof gatewayUtteranceFinalizeRequest>;
 

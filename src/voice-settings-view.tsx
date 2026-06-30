@@ -142,16 +142,34 @@ export function ReviewProviderSelect({
 export function ReviewAvailabilityPanel({
   connected,
   preferredReviewProvider,
+  reviewVoiceVerifiedAtMs,
+  reviewVoiceVerifiedProviderId,
   selectedReviewProviderMissing,
   status,
   onCheckAgain,
 }: {
   connected: boolean;
   preferredReviewProvider: string;
+  reviewVoiceVerifiedAtMs?: number | null;
+  reviewVoiceVerifiedProviderId?: string;
   selectedReviewProviderMissing: boolean;
   status: TalkCatalogReviewStatus;
   onCheckAgain: () => void;
 }) {
+  const reviewVoiceVerifiedForCurrentProvider = Boolean(
+    reviewVoiceVerifiedAtMs &&
+    status.state === "ready" &&
+    status.providerId &&
+    reviewVoiceVerifiedProviderId === status.providerId,
+  );
+  const verificationCopy = reviewVoiceVerifiedForCurrentProvider
+    ? "Verified this launch with returned Review transcript text."
+    : status.state === "ready"
+      ? "Catalog is listed. Verify Review with one short glasses recording; ready means transcript text appears before sending."
+      : status.state === "needs-setup" || status.state === "unavailable"
+        ? "Use the setup request below, send it to OpenClaw, then Check again before relying on Review."
+      : "After Gateway setup, verify Review with one short glasses recording.";
+
   return (
     <div
       className={cx(styles["review-availability"], reviewAvailabilityClass(status.state))}
@@ -167,6 +185,7 @@ export function ReviewAvailabilityPanel({
             Choose Gateway default or send the setup request to OpenClaw.
           </p>
         ) : null}
+        <p>{verificationCopy}</p>
       </div>
       <button
         type="button"

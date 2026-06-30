@@ -16,6 +16,7 @@ const GATEWAY_AUTH_URL_SETUP_PARAMS = new Set([
   "setup_token",
   "setuptoken",
 ]);
+const NODE_CATALOG_SOURCE = "__openclawNodeCatalogSource";
 
 export type GatewayRole = "node" | "operator";
 
@@ -185,6 +186,15 @@ export class GatewayConnectError extends Error {
     super(message);
     this.name = "GatewayConnectError";
   }
+}
+
+function gatewayErrorFromConnectError(error: Error) {
+  return error instanceof GatewayConnectError ? error.gatewayError : undefined;
+}
+
+function requestIdFromGatewayError(error: GatewayErrorShape | undefined) {
+  const requestId = error?.details?.requestId;
+  return typeof requestId === "string" && requestId.trim() ? requestId.trim() : "";
 }
 
 export function createGatewayRequestId(prefix = "req", webCrypto: RandomIdCrypto | undefined = globalThis.crypto) {
@@ -655,6 +665,9 @@ function shouldPauseOperatorReconnect(reason: string) {
     normalized.includes("not approved") ||
     normalized.includes("approval") ||
     normalized.includes("pairing required") ||
+    normalized.includes("higher role") ||
+    normalized.includes("role-upgrade") ||
+    normalized.includes("role upgrade") ||
     normalized.includes("scope upgrade")
   );
 }
@@ -688,7 +701,7 @@ export type DirectTransportMessage =
   | { type: "eveng2.approval.request"; id?: string; requestId?: string; command?: string; cwd?: string | null; ask?: string | null; security?: string | null }
   | { type: "eveng2.approval.resolved"; id?: string; requestId?: string; decision?: string | null }
   | { type: "eveng2.approval.resolve.ack"; id?: string; requestId?: string; decision?: string | null; status: string; message?: string | null; error?: string }
-  | { type: "error"; id?: string; error: string; pauseReconnect?: boolean };
+  | { type: "error"; id?: string; error: string; requestId?: string; pauseReconnect?: boolean };
 
 export type DirectTransportOptions = {
   setupCodeOrUrl: string;
@@ -723,6 +736,7 @@ type DirectAppCommand =
   | { type: "eveng2.session.create"; label?: string }
   | { type: "eveng2.session.send"; sessionKey?: string; message?: string; text?: string; idempotencyKey?: string }
   | { type: "eveng2.node.command.result"; id?: string; ok?: boolean; payload?: unknown; error?: unknown }
+  | { type: "eveng2.node.approval.refresh" }
   | { type: "eveng2.approval.resolve"; id?: string; requestId?: string; decision?: string };
 
 function asObject(value: unknown): Record<string, unknown> | null {
@@ -735,6 +749,16 @@ function asString(value: unknown) {
 
 function asStringArray(value: unknown): string[] {
   return Array.isArray(value) ? value.map(asString).filter(Boolean) : [];
+}
+
+function asObjectArray(value: unknown): Record<string, unknown>[] {
+  return Array.isArray(value)
+    ? value.map((item) => asObject(item)).filter((item): item is Record<string, unknown> => Boolean(item))
+    : [];
+}
+
+function uniqueStrings(values: string[]) {
+  return [...new Set(values.map((value) => value.trim()).filter(Boolean))];
 }
 
 function sessionKeyFrom(value: Record<string, unknown>) {
@@ -763,7 +787,35 @@ function nodeDeviceId(value: Record<string, unknown>) {
 
 function isPendingNodeApproval(value: Record<string, unknown>) {
   const approvalState = asString(value.approvalState).toLowerCase();
-  return approvalState === "pending-approval" || approvalState === "pending-reapproval";
+  if (approvalState) return approvalState === "pending-approval" || approvalState === "pending-reapproval";
+  return Boolean(asString(value.pendingRequestId) || asString(value.requestId));
+}
+
+function pendingNodeCatalogRow(value: Record<string, unknown>) {
+  return {
+    ...value,
+    approvalState: asString(value.approvalState) || "pending-approval",
+  };
+}
+
+function nodeCatalogRow(value: Record<string, unknown>, source: "nodes" | "paired" | "pending") {
+  return {
+    ...value,
+    [NODE_CATALOG_SOURCE]: source,
+  };
+}
+
+function isPendingCatalogSource(value: Record<string, unknown>) {
+  return value[NODE_CATALOG_SOURCE] === "pending";
+}
+
+function nodeCatalogRows(payload: unknown) {
+  const root = asObject(payload);
+  const directRows = asObjectArray(root?.nodes).map((node) => nodeCatalogRow(node, "nodes"));
+  const pairedRows = asObjectArray(root?.paired).map((node) => nodeCatalogRow(node, "paired"));
+  const pendingRows = asObjectArray(root?.pending).map((node) => nodeCatalogRow(pendingNodeCatalogRow(node), "pending"));
+  if (directRows.length || pendingRows.length || pairedRows.length) return [...directRows, ...pairedRows, ...pendingRows];
+  return asObjectArray(payload);
 }
 
 function evenG2NodeSnapshotFromCatalogRow(value: Record<string, unknown>, fallbackDeviceId = "") {
@@ -778,7 +830,6 @@ function evenG2NodeSnapshotFromCatalogRow(value: Record<string, unknown>, fallba
     connected: value.connected === true,
     paired: value.paired === true,
     approvalState: asString(value.approvalState),
-    pendingRequestId: asString(value.pendingRequestId) || asString(value.requestId),
     openclaw: {
       nodeEnabled: true,
       commands: asStringArray(value.commands).length ? asStringArray(value.commands) : asStringArray(value.pendingDeclaredCommands),
@@ -787,6 +838,56 @@ function evenG2NodeSnapshotFromCatalogRow(value: Record<string, unknown>, fallba
       lastDisconnectedAt: asString(value.disconnectedAt),
     },
   };
+}
+
+function suppressReadyApprovalStateWhilePending(
+  snapshot: ReturnType<typeof evenG2NodeSnapshotFromCatalogRow>,
+  pending: Record<string, unknown> | undefined,
+) {
+  if (!pending) return snapshot;
+  const approvalState = asString(snapshot.approvalState).toLowerCase();
+  if (approvalState !== "approved" && approvalState !== "ready") return snapshot;
+  return {
+    ...snapshot,
+    approvalState: "",
+  };
+}
+
+function sameCatalogNode(left: Record<string, unknown>, right: Record<string, unknown>) {
+  const leftNodeId = asString(left.nodeId);
+  const rightNodeId = asString(right.nodeId);
+  if (leftNodeId && rightNodeId) return leftNodeId === rightNodeId;
+  const leftDeviceId = nodeDeviceId(left);
+  const rightDeviceId = nodeDeviceId(right);
+  if (leftDeviceId && rightDeviceId) return leftDeviceId === rightDeviceId;
+  return false;
+}
+
+function pendingCatalogRowMatchesCurrent(
+  current: Record<string, unknown>,
+  pending: Record<string, unknown>,
+  runtimeCandidates: Record<string, unknown>[],
+  pendingCandidates: Record<string, unknown>[],
+) {
+  if (sameCatalogNode(current, pending)) return true;
+  if (asString(pending.nodeId) || nodeDeviceId(pending)) return false;
+  return runtimeCandidates.every((node) => sameCatalogNode(current, node)) && pendingCandidates.length === 1;
+}
+
+function sourcePendingRowCanMatchCurrent(current: Record<string, unknown>, pending: Record<string, unknown>) {
+  if (sameCatalogNode(current, pending)) return true;
+  if (looksLikeEvenG2Node(pending)) return true;
+  return isPendingNodeApproval(current) && !asString(pending.nodeId) && !nodeDeviceId(pending);
+}
+
+function preferredCatalogNode(nodes: Record<string, unknown>[]) {
+  return [...nodes].sort((left, right) => {
+    const leftScore =
+      (left.connected === true ? 4 : 0) + (left.paired === true ? 2 : 0) + (left[NODE_CATALOG_SOURCE] === "paired" ? 1 : 0);
+    const rightScore =
+      (right.connected === true ? 4 : 0) + (right.paired === true ? 2 : 0) + (right[NODE_CATALOG_SOURCE] === "paired" ? 1 : 0);
+    return rightScore - leftScore;
+  })[0];
 }
 
 function messageTextFrom(value: Record<string, unknown>) {
@@ -1107,6 +1208,10 @@ export class GatewayDirectTransport extends EventTarget {
             });
           }
           return;
+        case "eveng2.node.approval.refresh":
+          if (!this.operatorSession) return;
+          await this.refreshNodeApprovalStatus();
+          return;
         case "eveng2.approval.resolve":
           if (!this.operatorSession) return;
           await this.operatorSession.request("exec.approval.resolve", { id: msg.id || msg.requestId, decision: msg.decision });
@@ -1296,20 +1401,36 @@ export class GatewayDirectTransport extends EventTarget {
     if (!this.operatorSession) return;
     try {
       const payload = await this.operatorSession.request("node.list", {}, 5000);
-      const root = asObject(payload);
-      const rows = Array.isArray(root?.nodes) ? root.nodes : Array.isArray(payload) ? payload : [];
-      const nodes = rows.map((row) => asObject(row)).filter((row): row is Record<string, unknown> => Boolean(row));
+      const nodes = nodeCatalogRows(payload);
       const candidates = nodes.filter((node) => looksLikeEvenG2Node(node));
-      const current = this.nodeForCurrentDevice(candidates);
+      const allSourcePendingCandidates = nodes.filter((node) => isPendingCatalogSource(node));
+      const runtimeCandidates = candidates.filter((node) => !isPendingCatalogSource(node));
+      const current = this.nodeForCurrentDevice(runtimeCandidates);
+      const sourcePendingCandidates = current
+        ? allSourcePendingCandidates.filter((node) => sourcePendingRowCanMatchCurrent(current, node))
+        : allSourcePendingCandidates.filter((node) => looksLikeEvenG2Node(node));
+      const pendingCandidates = [...sourcePendingCandidates, ...runtimeCandidates.filter((node) => isPendingNodeApproval(node))];
+      let pending = this.nodeForCurrentDevice(pendingCandidates);
+      const matchingSourcePending = current
+        ? sourcePendingCandidates.find((node) => pendingCatalogRowMatchesCurrent(current, node, runtimeCandidates, sourcePendingCandidates))
+        : undefined;
+      if (matchingSourcePending) pending = matchingSourcePending;
+      const pendingMatchCandidates = pending && isPendingCatalogSource(pending) ? sourcePendingCandidates : pendingCandidates;
+      if (current && pending && !pendingCatalogRowMatchesCurrent(current, pending, runtimeCandidates, pendingMatchCandidates)) {
+        pending = undefined;
+      }
       if (current) {
         this.rememberCatalogNode(current);
+        const node = suppressReadyApprovalStateWhilePending(
+          evenG2NodeSnapshotFromCatalogRow(current, this.connectedDeviceId),
+          pending,
+        );
         this.emit({
           type: "eveng2.runtime.status",
           session: this.selectedSessionKey,
-          node: evenG2NodeSnapshotFromCatalogRow(current, this.connectedDeviceId),
+          node,
         });
       }
-      const pending = this.nodeForCurrentDevice(candidates.filter((node) => isPendingNodeApproval(node)));
       if (!pending) {
         if (this.nodeApprovalPending) this.emit({ type: "eveng2.node.approval.ready" });
         this.nodeApprovalPending = false;
@@ -1318,8 +1439,7 @@ export class GatewayDirectTransport extends EventTarget {
       this.nodeApprovalPending = true;
       this.emit({
         type: "eveng2.node.approval.required",
-        nodeId: asString(pending.nodeId),
-        requestId: asString(pending.pendingRequestId) || asString(pending.requestId) || undefined,
+        nodeId: asString(pending.nodeId) || (current ? asString(current.nodeId) : ""),
         approvalState: asString(pending.approvalState),
         commands: asStringArray(pending.pendingDeclaredCommands).length
           ? asStringArray(pending.pendingDeclaredCommands)
@@ -1351,10 +1471,12 @@ export class GatewayDirectTransport extends EventTarget {
   }
 
   private fail(error: Error) {
-    const gatewayError = error instanceof GatewayConnectError ? error.gatewayError : undefined;
+    const gatewayError = gatewayErrorFromConnectError(error);
+    const requestId = requestIdFromGatewayError(gatewayError);
     this.emit({
       type: "error",
       error: error.message,
+      ...(requestId ? { requestId } : {}),
       ...(gatewayError?.details?.pauseReconnect ? { pauseReconnect: true } : {}),
     });
   }
@@ -1362,12 +1484,15 @@ export class GatewayDirectTransport extends EventTarget {
   private handleOperatorSessionError(error: Error, session: GatewayWsSession) {
     if (this.operatorSession !== session) return;
     if (this.nodeSessionOpen) {
-      const pauseReconnect = shouldPauseOperatorReconnect(error.message);
+      const gatewayError = gatewayErrorFromConnectError(error);
+      const requestId = requestIdFromGatewayError(gatewayError);
+      const pauseReconnect = Boolean(gatewayError?.details?.pauseReconnect) || shouldPauseOperatorReconnect(error.message);
       this.operatorSession = null;
       session.close();
       this.emit({
         type: "error",
         error: error.message,
+        ...(requestId ? { requestId } : {}),
         ...(pauseReconnect ? { pauseReconnect: true } : {}),
       });
       if (!pauseReconnect) this.close(undefined, error.message || "operator session failed");
@@ -1398,17 +1523,19 @@ export class GatewayDirectTransport extends EventTarget {
 
   private nodeForCurrentDevice(nodes: Record<string, unknown>[]) {
     if (this.connectedNodeId) {
-      const byNodeId = nodes.find((node) => asString(node.nodeId) === this.connectedNodeId);
+      const byNodeId = preferredCatalogNode(nodes.filter((node) => asString(node.nodeId) === this.connectedNodeId));
       if (byNodeId) return byNodeId;
     }
     if (this.connectedDeviceId) {
-      const byDeviceId = nodes.find((node) => nodeDeviceId(node) === this.connectedDeviceId);
+      const byDeviceId = preferredCatalogNode(nodes.filter((node) => nodeDeviceId(node) === this.connectedDeviceId));
       if (byDeviceId) return byDeviceId;
       const rowsWithDeviceId = nodes.filter((node) => nodeDeviceId(node));
-      if (!this.connectedNodeId && rowsWithDeviceId.length === 0 && nodes.length === 1) return nodes[0];
+      if (!this.connectedNodeId && rowsWithDeviceId.length === 0 && nodes.length === 1) return preferredCatalogNode(nodes);
+      const nodeIds = uniqueStrings(nodes.map((node) => asString(node.nodeId)));
+      if (!this.connectedNodeId && rowsWithDeviceId.length === 0 && nodeIds.length === 1) return preferredCatalogNode(nodes);
     }
     if (this.connectedNodeId || this.connectedDeviceId) return undefined;
-    return nodes[0];
+    return preferredCatalogNode(nodes);
   }
 
   private rememberCatalogNode(node: Record<string, unknown>) {
@@ -1434,7 +1561,7 @@ export class GatewayDirectTransport extends EventTarget {
 
   private shouldRetryWithLegacyClientId(error: Error) {
     if (this.gatewayClientId !== "openclaw-even-g2-node" || this.triedLegacyClientId || this.nodeSessionOpen) return false;
-    const gatewayError = error instanceof GatewayConnectError ? error.gatewayError : undefined;
+    const gatewayError = gatewayErrorFromConnectError(error);
     const haystack = [
       error.message,
       gatewayError?.code,

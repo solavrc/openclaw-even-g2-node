@@ -8,6 +8,7 @@ import {
   buildEvenG2ClientInfo,
   clearBrowserDeviceCredentials,
   createGatewayRequestId,
+  GatewayConnectError,
   GatewayDirectTransport,
   GatewayDirectVoiceTransport,
   gatewayRpcRequestEnvelope,
@@ -785,6 +786,46 @@ describe("Gateway direct transcript history", () => {
     });
   });
 
+  it("treats pending node approval state as pending even when command lists are omitted", async () => {
+    const request = vi.fn(async (method: string) => {
+      if (method === "node.list") {
+        return {
+          nodes: [{
+            nodeId: "node-1",
+            deviceId: "device-1",
+            displayName: "Even G2",
+            platform: "even-g2",
+            deviceFamily: "glasses",
+            approvalState: "pending-approval",
+          }],
+        };
+      }
+      return {};
+    });
+    const gateway = new GatewayDirectTransport({
+      setupCodeOrUrl: "ws://127.0.0.1:18789",
+      token: "",
+    });
+    const messages: Array<Record<string, unknown>> = [];
+    gateway.addEventListener("message", (event) => {
+      messages.push(JSON.parse((event as MessageEvent).data as string) as Record<string, unknown>);
+    });
+    Reflect.set(gateway, "operatorSession", { request });
+    Reflect.set(gateway, "nodeApprovalPending", true);
+
+    const refreshNodeApprovalStatus = Reflect.get(gateway, "refreshNodeApprovalStatus");
+    if (typeof refreshNodeApprovalStatus !== "function") throw new Error("GatewayDirectTransport.refreshNodeApprovalStatus is unavailable");
+    await refreshNodeApprovalStatus.call(gateway);
+
+    expect(messages).toContainEqual({
+      type: "eveng2.node.approval.required",
+      nodeId: "node-1",
+      approvalState: "pending-approval",
+      commands: [],
+    });
+    expect(messages).not.toContainEqual({ type: "eveng2.node.approval.ready" });
+  });
+
   it("ignores pending Even G2 node approval for a different device identity", async () => {
     const request = vi.fn(async (method: string) => {
       if (method === "node.list") {
@@ -881,9 +922,444 @@ describe("Gateway direct transcript history", () => {
     expect(messages).toContainEqual({
       type: "eveng2.node.approval.required",
       nodeId: "node-pending",
-      requestId: "request-pending",
       approvalState: "pending-approval",
       commands: ["canvas.present"],
+    });
+  });
+
+  it("detects pending Even G2 node approvals when node.list exposes pending and paired output", async () => {
+    const request = vi.fn(async (method: string) => {
+      if (method === "node.list") {
+        return {
+          pending: [{
+            requestId: "13cd37a9-2ab9-42d7-9610-1202afcf1b47",
+            nodeId: "node-current",
+            displayName: "Even G2",
+            platform: "even-g2",
+            deviceFamily: "glasses",
+            modelIdentifier: "Even G2",
+            caps: ["device", "talk", "canvas"],
+            commands: ["device.status", "talk.ptt.once", "canvas.present"],
+            requiredApproveScopes: ["operator.pairing", "operator.write"],
+          }],
+          paired: [{
+            nodeId: "node-current",
+            displayName: "Even G2",
+            platform: "even-g2",
+            clientId: "node-host",
+            clientMode: "node",
+            deviceFamily: "glasses",
+            modelIdentifier: "Even G2",
+            approvalState: "pending-approval",
+            paired: true,
+            connected: true,
+          }],
+        };
+      }
+      return {};
+    });
+    const gateway = new GatewayDirectTransport({
+      setupCodeOrUrl: "ws://127.0.0.1:18789",
+      token: "",
+    });
+    const messages: Array<Record<string, unknown>> = [];
+    gateway.addEventListener("message", (event) => {
+      messages.push(JSON.parse((event as MessageEvent).data as string) as Record<string, unknown>);
+    });
+    Reflect.set(gateway, "operatorSession", { request });
+    Reflect.set(gateway, "connectedDeviceId", "device-current");
+
+    const refreshNodeApprovalStatus = Reflect.get(gateway, "refreshNodeApprovalStatus");
+    if (typeof refreshNodeApprovalStatus !== "function") throw new Error("GatewayDirectTransport.refreshNodeApprovalStatus is unavailable");
+    await refreshNodeApprovalStatus.call(gateway);
+
+    expect(messages).toContainEqual({
+      type: "eveng2.runtime.status",
+      session: "",
+      node: expect.objectContaining({
+        nodeId: "node-current",
+        nodeConnected: true,
+        connected: true,
+        approvalState: "pending-approval",
+      }),
+    });
+    expect(messages).toContainEqual({
+      type: "eveng2.node.approval.required",
+      nodeId: "node-current",
+      approvalState: "pending-approval",
+      commands: ["device.status", "talk.ptt.once", "canvas.present"],
+    });
+  });
+
+  it("merges pending approval rows with current node.list rows", async () => {
+    const request = vi.fn(async (method: string) => {
+      if (method === "node.list") {
+        return {
+          nodes: [{
+            nodeId: "node-current",
+            deviceId: "device-current",
+            displayName: "Even G2",
+            platform: "even-g2",
+            deviceFamily: "glasses",
+            approvalState: "approved",
+            commands: ["canvas.present"],
+          }],
+          pending: [{
+            requestId: "13cd37a9-2ab9-42d7-9610-1202afcf1b47",
+            nodeId: "node-current",
+            displayName: "Even G2",
+            platform: "even-g2",
+            deviceFamily: "glasses",
+            commands: ["talk.ptt.once"],
+          }],
+        };
+      }
+      return {};
+    });
+    const gateway = new GatewayDirectTransport({
+      setupCodeOrUrl: "ws://127.0.0.1:18789",
+      token: "",
+    });
+    const messages: Array<Record<string, unknown>> = [];
+    gateway.addEventListener("message", (event) => {
+      messages.push(JSON.parse((event as MessageEvent).data as string) as Record<string, unknown>);
+    });
+    Reflect.set(gateway, "operatorSession", { request });
+    Reflect.set(gateway, "connectedDeviceId", "device-current");
+
+    const refreshNodeApprovalStatus = Reflect.get(gateway, "refreshNodeApprovalStatus");
+    if (typeof refreshNodeApprovalStatus !== "function") throw new Error("GatewayDirectTransport.refreshNodeApprovalStatus is unavailable");
+    await refreshNodeApprovalStatus.call(gateway);
+
+    const runtimeStatus = messages.find((message) => message.type === "eveng2.runtime.status");
+    expect(runtimeStatus).toEqual(expect.objectContaining({
+      type: "eveng2.runtime.status",
+      session: "",
+      node: expect.objectContaining({
+        nodeId: "node-current",
+        deviceId: "device-current",
+        approvalState: "",
+      }),
+    }));
+    expect(messages).toContainEqual({
+      type: "eveng2.node.approval.required",
+      nodeId: "node-current",
+      approvalState: "pending-approval",
+      commands: ["talk.ptt.once"],
+    });
+  });
+
+  it("keeps runtime pending approval rows when a different top-level pending request exists", async () => {
+    const request = vi.fn(async (method: string) => {
+      if (method === "node.list") {
+        return {
+          nodes: [{
+            nodeId: "node-current",
+            deviceId: "device-current",
+            displayName: "Even G2",
+            platform: "even-g2",
+            deviceFamily: "glasses",
+            approvalState: "pending-approval",
+            commands: ["canvas.present"],
+          }],
+          pending: [{
+            requestId: "other-request",
+            nodeId: "node-other",
+            deviceId: "device-other",
+            displayName: "Even G2",
+            platform: "even-g2",
+            deviceFamily: "glasses",
+            commands: ["talk.ptt.once"],
+          }],
+        };
+      }
+      return {};
+    });
+    const gateway = new GatewayDirectTransport({
+      setupCodeOrUrl: "ws://127.0.0.1:18789",
+      token: "",
+    });
+    const messages: Array<Record<string, unknown>> = [];
+    gateway.addEventListener("message", (event) => {
+      messages.push(JSON.parse((event as MessageEvent).data as string) as Record<string, unknown>);
+    });
+    Reflect.set(gateway, "operatorSession", { request });
+    Reflect.set(gateway, "connectedDeviceId", "device-current");
+
+    const refreshNodeApprovalStatus = Reflect.get(gateway, "refreshNodeApprovalStatus");
+    if (typeof refreshNodeApprovalStatus !== "function") throw new Error("GatewayDirectTransport.refreshNodeApprovalStatus is unavailable");
+    await refreshNodeApprovalStatus.call(gateway);
+
+    expect(messages).toContainEqual({
+      type: "eveng2.node.approval.required",
+      nodeId: "node-current",
+      approvalState: "pending-approval",
+      commands: ["canvas.present"],
+    });
+  });
+
+  it("preserves id-less source pending approval when the runtime row is also pending", async () => {
+    const request = vi.fn(async (method: string) => {
+      if (method === "node.list") {
+        return {
+          nodes: [{
+            nodeId: "node-current",
+            deviceId: "device-current",
+            displayName: "Even G2",
+            platform: "even-g2",
+            deviceFamily: "glasses",
+            approvalState: "pending-approval",
+            commands: ["canvas.present"],
+          }],
+          pending: [{
+            requestId: "13cd37a9-2ab9-42d7-9610-1202afcf1b47",
+            commands: ["talk.ptt.once"],
+          }],
+        };
+      }
+      return {};
+    });
+    const gateway = new GatewayDirectTransport({
+      setupCodeOrUrl: "ws://127.0.0.1:18789",
+      token: "",
+    });
+    const messages: Array<Record<string, unknown>> = [];
+    gateway.addEventListener("message", (event) => {
+      messages.push(JSON.parse((event as MessageEvent).data as string) as Record<string, unknown>);
+    });
+    Reflect.set(gateway, "operatorSession", { request });
+    Reflect.set(gateway, "connectedDeviceId", "device-current");
+
+    const refreshNodeApprovalStatus = Reflect.get(gateway, "refreshNodeApprovalStatus");
+    if (typeof refreshNodeApprovalStatus !== "function") throw new Error("GatewayDirectTransport.refreshNodeApprovalStatus is unavailable");
+    await refreshNodeApprovalStatus.call(gateway);
+
+    expect(messages).toContainEqual({
+      type: "eveng2.node.approval.required",
+      nodeId: "node-current",
+      approvalState: "pending-approval",
+      commands: ["talk.ptt.once"],
+    });
+  });
+
+  it("matches top-level pending rows by id when they omit Even G2 metadata", async () => {
+    const request = vi.fn(async (method: string) => {
+      if (method === "node.list") {
+        return {
+          nodes: [{
+            nodeId: "node-current",
+            deviceId: "device-current",
+            displayName: "Even G2",
+            platform: "even-g2",
+            deviceFamily: "glasses",
+            approvalState: "approved",
+            commands: ["canvas.present"],
+          }],
+          pending: [{
+            requestId: "13cd37a9-2ab9-42d7-9610-1202afcf1b47",
+            nodeId: "node-current",
+            commands: ["talk.ptt.once"],
+          }],
+        };
+      }
+      return {};
+    });
+    const gateway = new GatewayDirectTransport({
+      setupCodeOrUrl: "ws://127.0.0.1:18789",
+      token: "",
+    });
+    const messages: Array<Record<string, unknown>> = [];
+    gateway.addEventListener("message", (event) => {
+      messages.push(JSON.parse((event as MessageEvent).data as string) as Record<string, unknown>);
+    });
+    Reflect.set(gateway, "operatorSession", { request });
+    Reflect.set(gateway, "connectedDeviceId", "device-current");
+
+    const refreshNodeApprovalStatus = Reflect.get(gateway, "refreshNodeApprovalStatus");
+    if (typeof refreshNodeApprovalStatus !== "function") throw new Error("GatewayDirectTransport.refreshNodeApprovalStatus is unavailable");
+    await refreshNodeApprovalStatus.call(gateway);
+
+    expect(messages).toContainEqual({
+      type: "eveng2.node.approval.required",
+      nodeId: "node-current",
+      approvalState: "pending-approval",
+      commands: ["talk.ptt.once"],
+    });
+  });
+
+  it("ignores request-only source pending rows when the current node is already approved", async () => {
+    const request = vi.fn(async (method: string) => {
+      if (method === "node.list") {
+        return {
+          nodes: [{
+            nodeId: "node-current",
+            deviceId: "device-current",
+            displayName: "Even G2",
+            platform: "even-g2",
+            deviceFamily: "glasses",
+            approvalState: "approved",
+            commands: ["canvas.present"],
+          }],
+          pending: [{
+            requestId: "request-other-client",
+            commands: ["other.command"],
+          }],
+        };
+      }
+      return {};
+    });
+    const gateway = new GatewayDirectTransport({
+      setupCodeOrUrl: "ws://127.0.0.1:18789",
+      token: "",
+    });
+    const messages: Array<Record<string, unknown>> = [];
+    gateway.addEventListener("message", (event) => {
+      messages.push(JSON.parse((event as MessageEvent).data as string) as Record<string, unknown>);
+    });
+    Reflect.set(gateway, "operatorSession", { request });
+    Reflect.set(gateway, "connectedDeviceId", "device-current");
+    Reflect.set(gateway, "nodeApprovalPending", true);
+
+    const refreshNodeApprovalStatus = Reflect.get(gateway, "refreshNodeApprovalStatus");
+    if (typeof refreshNodeApprovalStatus !== "function") throw new Error("GatewayDirectTransport.refreshNodeApprovalStatus is unavailable");
+    await refreshNodeApprovalStatus.call(gateway);
+
+    expect(messages).toContainEqual({
+      type: "eveng2.runtime.status",
+      session: "",
+      node: expect.objectContaining({
+        nodeId: "node-current",
+        approvalState: "approved",
+      }),
+    });
+    expect(messages).toContainEqual({ type: "eveng2.node.approval.ready" });
+    expect(messages).not.toContainEqual(expect.objectContaining({
+      type: "eveng2.node.approval.required",
+    }));
+  });
+
+  it("preserves a singleton id-less pending approval row for the current node", async () => {
+    const request = vi.fn(async (method: string) => {
+      if (method === "node.list") {
+        return {
+          nodes: [{
+            nodeId: "node-current",
+            deviceId: "device-current",
+            displayName: "Even G2",
+            platform: "even-g2",
+            deviceFamily: "glasses",
+            approvalState: "approved",
+            commands: ["canvas.present"],
+          }],
+          pending: [{
+            requestId: "13cd37a9-2ab9-42d7-9610-1202afcf1b47",
+            displayName: "Even G2",
+            platform: "even-g2",
+            deviceFamily: "glasses",
+            caps: ["device", "talk", "canvas"],
+            commands: ["device.status", "talk.ptt.once", "canvas.present"],
+          }],
+        };
+      }
+      return {};
+    });
+    const gateway = new GatewayDirectTransport({
+      setupCodeOrUrl: "ws://127.0.0.1:18789",
+      token: "",
+    });
+    const messages: Array<Record<string, unknown>> = [];
+    gateway.addEventListener("message", (event) => {
+      messages.push(JSON.parse((event as MessageEvent).data as string) as Record<string, unknown>);
+    });
+    Reflect.set(gateway, "operatorSession", { request });
+    Reflect.set(gateway, "connectedDeviceId", "device-current");
+
+    const refreshNodeApprovalStatus = Reflect.get(gateway, "refreshNodeApprovalStatus");
+    if (typeof refreshNodeApprovalStatus !== "function") throw new Error("GatewayDirectTransport.refreshNodeApprovalStatus is unavailable");
+    await refreshNodeApprovalStatus.call(gateway);
+
+    const runtimeStatus = messages.find((message) => message.type === "eveng2.runtime.status");
+    expect(runtimeStatus).toEqual(expect.objectContaining({
+      type: "eveng2.runtime.status",
+      node: expect.objectContaining({
+        nodeId: "node-current",
+        approvalState: "",
+      }),
+    }));
+    expect(messages).toContainEqual({
+      type: "eveng2.node.approval.required",
+      nodeId: "node-current",
+      approvalState: "pending-approval",
+      commands: ["device.status", "talk.ptt.once", "canvas.present"],
+    });
+  });
+
+  it("preserves id-less pending approval when nodes and paired duplicate the current node", async () => {
+    const request = vi.fn(async (method: string) => {
+      if (method === "node.list") {
+        return {
+          nodes: [{
+            nodeId: "node-current",
+            deviceId: "device-current",
+            displayName: "Even G2",
+            platform: "even-g2",
+            deviceFamily: "glasses",
+            approvalState: "approved",
+            commands: ["canvas.present"],
+          }],
+          paired: [{
+            nodeId: "node-current",
+            deviceId: "device-current",
+            displayName: "Even G2",
+            platform: "even-g2",
+            deviceFamily: "glasses",
+            approvalState: "approved",
+            paired: true,
+            connected: true,
+            commands: ["canvas.present"],
+          }],
+          pending: [{
+            requestId: "13cd37a9-2ab9-42d7-9610-1202afcf1b47",
+            displayName: "Even G2",
+            platform: "even-g2",
+            deviceFamily: "glasses",
+            commands: ["talk.ptt.once"],
+          }],
+        };
+      }
+      return {};
+    });
+    const gateway = new GatewayDirectTransport({
+      setupCodeOrUrl: "ws://127.0.0.1:18789",
+      token: "",
+    });
+    const messages: Array<Record<string, unknown>> = [];
+    gateway.addEventListener("message", (event) => {
+      messages.push(JSON.parse((event as MessageEvent).data as string) as Record<string, unknown>);
+    });
+    Reflect.set(gateway, "operatorSession", { request });
+    Reflect.set(gateway, "connectedDeviceId", "device-current");
+
+    const refreshNodeApprovalStatus = Reflect.get(gateway, "refreshNodeApprovalStatus");
+    if (typeof refreshNodeApprovalStatus !== "function") throw new Error("GatewayDirectTransport.refreshNodeApprovalStatus is unavailable");
+    await refreshNodeApprovalStatus.call(gateway);
+
+    const runtimeStatus = messages.find((message) => message.type === "eveng2.runtime.status");
+    expect(runtimeStatus).toEqual(expect.objectContaining({
+      type: "eveng2.runtime.status",
+      node: expect.objectContaining({
+        nodeId: "node-current",
+        nodeConnected: true,
+        connected: true,
+        paired: true,
+        approvalState: "",
+      }),
+    }));
+    expect(messages).toContainEqual({
+      type: "eveng2.node.approval.required",
+      nodeId: "node-current",
+      approvalState: "pending-approval",
+      commands: ["talk.ptt.once"],
     });
   });
 
@@ -946,6 +1422,46 @@ describe("Gateway direct transcript history", () => {
     }));
   });
 
+  it("does not treat blank request id fields as pending node approval", async () => {
+    const request = vi.fn(async (method: string) => {
+      if (method === "node.list") {
+        return {
+          nodes: [{
+            nodeId: "node-current",
+            deviceId: "device-current",
+            displayName: "Even G2",
+            platform: "even-g2",
+            deviceFamily: "glasses",
+            pendingRequestId: null,
+            requestId: "",
+            commands: ["canvas.present"],
+          }],
+        };
+      }
+      return {};
+    });
+    const gateway = new GatewayDirectTransport({
+      setupCodeOrUrl: "ws://127.0.0.1:18789",
+      token: "",
+    });
+    const messages: Array<Record<string, unknown>> = [];
+    gateway.addEventListener("message", (event) => {
+      messages.push(JSON.parse((event as MessageEvent).data as string) as Record<string, unknown>);
+    });
+    Reflect.set(gateway, "operatorSession", { request });
+    Reflect.set(gateway, "connectedDeviceId", "device-current");
+    Reflect.set(gateway, "nodeApprovalPending", true);
+
+    const refreshNodeApprovalStatus = Reflect.get(gateway, "refreshNodeApprovalStatus");
+    if (typeof refreshNodeApprovalStatus !== "function") throw new Error("GatewayDirectTransport.refreshNodeApprovalStatus is unavailable");
+    await refreshNodeApprovalStatus.call(gateway);
+
+    expect(messages).toContainEqual({ type: "eveng2.node.approval.ready" });
+    expect(messages).not.toContainEqual(expect.objectContaining({
+      type: "eveng2.node.approval.required",
+    }));
+  });
+
   it("clears node command approval when node.list has no pending Even G2 node", async () => {
     const request = vi.fn(async (method: string) => {
       if (method === "node.list") {
@@ -987,6 +1503,91 @@ describe("Gateway direct transcript history", () => {
         approvalState: "approved",
       }),
     });
+    expect(messages).toContainEqual({ type: "eveng2.node.approval.ready" });
+  });
+
+  it("does not treat approved node rows with stale request ids as pending", async () => {
+    const request = vi.fn(async (method: string) => {
+      if (method === "node.list") {
+        return {
+          nodes: [{
+            nodeId: "node-1",
+            deviceId: "device-1",
+            displayName: "Even G2",
+            platform: "even-g2",
+            deviceFamily: "glasses",
+            approvalState: "approved",
+            pendingRequestId: "13cd37a9-2ab9-42d7-9610-1202afcf1b47",
+            requestId: "13cd37a9-2ab9-42d7-9610-1202afcf1b47",
+            commands: ["canvas.present", "talk.ptt.once"],
+          }],
+        };
+      }
+      return {};
+    });
+    const gateway = new GatewayDirectTransport({
+      setupCodeOrUrl: "ws://127.0.0.1:18789",
+      token: "",
+    });
+    const messages: Array<Record<string, unknown>> = [];
+    gateway.addEventListener("message", (event) => {
+      messages.push(JSON.parse((event as MessageEvent).data as string) as Record<string, unknown>);
+    });
+    Reflect.set(gateway, "operatorSession", { request });
+    Reflect.set(gateway, "nodeApprovalPending", true);
+
+    const refreshNodeApprovalStatus = Reflect.get(gateway, "refreshNodeApprovalStatus");
+    if (typeof refreshNodeApprovalStatus !== "function") throw new Error("GatewayDirectTransport.refreshNodeApprovalStatus is unavailable");
+    await refreshNodeApprovalStatus.call(gateway);
+
+    expect(messages).toContainEqual({
+      type: "eveng2.runtime.status",
+      session: "",
+      node: expect.objectContaining({
+        nodeId: "node-1",
+        approvalState: "approved",
+      }),
+    });
+    expect(messages).toContainEqual({ type: "eveng2.node.approval.ready" });
+    expect(messages).not.toContainEqual(expect.objectContaining({
+      type: "eveng2.node.approval.required",
+      nodeId: "node-1",
+    }));
+  });
+
+  it("refreshes node command approval when the app asks to check again", async () => {
+    const request = vi.fn(async (method: string) => {
+      if (method === "node.list") {
+        return {
+          nodes: [{
+            nodeId: "node-1",
+            deviceId: "device-1",
+            displayName: "Even G2",
+            platform: "even-g2",
+            deviceFamily: "glasses",
+            approvalState: "approved",
+            commands: ["canvas.present", "talk.ptt.once"],
+          }],
+        };
+      }
+      return {};
+    });
+    const gateway = new GatewayDirectTransport({
+      setupCodeOrUrl: "ws://127.0.0.1:18789",
+      token: "",
+    });
+    const messages: Array<Record<string, unknown>> = [];
+    gateway.addEventListener("message", (event) => {
+      messages.push(JSON.parse((event as MessageEvent).data as string) as Record<string, unknown>);
+    });
+    Reflect.set(gateway, "operatorSession", { request });
+    Reflect.set(gateway, "nodeApprovalPending", true);
+
+    const handleAppCommand = Reflect.get(gateway, "handleAppCommand");
+    if (typeof handleAppCommand !== "function") throw new Error("GatewayDirectTransport.handleAppCommand is unavailable");
+    await handleAppCommand.call(gateway, { type: "eveng2.node.approval.refresh" });
+
+    expect(request).toHaveBeenCalledWith("node.list", {}, 5000);
     expect(messages).toContainEqual({ type: "eveng2.node.approval.ready" });
   });
 
@@ -1152,6 +1753,29 @@ describe("Gateway direct voice", () => {
     expect(errorListener).not.toHaveBeenCalled();
   });
 
+  it("preserves Gateway request ids from connect errors", () => {
+    const gateway = new GatewayDirectTransport({
+      setupCodeOrUrl: "ws://127.0.0.1:18789",
+      token: "",
+    });
+    const messages: Array<Record<string, unknown>> = [];
+    gateway.addEventListener("message", (event) => {
+      messages.push(JSON.parse((event as MessageEvent).data as string) as Record<string, unknown>);
+    });
+
+    const fail = Reflect.get(gateway, "fail");
+    if (typeof fail !== "function") throw new Error("GatewayDirectTransport.fail is unavailable");
+    fail.call(gateway, new GatewayConnectError("device is not approved yet", {
+      details: { requestId: "6fbee43c-5f38-4c2b-b7b1-13c121edf0b5" },
+    }));
+
+    expect(messages).toContainEqual({
+      type: "error",
+      error: "device is not approved yet",
+      requestId: "6fbee43c-5f38-4c2b-b7b1-13c121edf0b5",
+    });
+  });
+
   it("keeps the node session open when the operator session is not yet authorized", () => {
     const gateway = new GatewayDirectTransport({
       setupCodeOrUrl: "ws://127.0.0.1:18789",
@@ -1176,6 +1800,37 @@ describe("Gateway direct voice", () => {
     expect(messages).toContainEqual({
       type: "error",
       error: "unauthorized: gateway token missing",
+      pauseReconnect: true,
+    });
+  });
+
+  it("preserves operator approval request ids while keeping the node session open", () => {
+    const gateway = new GatewayDirectTransport({
+      setupCodeOrUrl: "ws://127.0.0.1:18789",
+      token: "",
+    });
+    const session = { close: vi.fn() };
+    const messages: Array<Record<string, unknown>> = [];
+    gateway.addEventListener("message", (event) => {
+      messages.push(JSON.parse((event as MessageEvent).data as string) as Record<string, unknown>);
+    });
+    Reflect.set(gateway, "nodeSessionOpen", true);
+    Reflect.set(gateway, "operatorSession", session);
+
+    const handleOperatorSessionError = Reflect.get(gateway, "handleOperatorSessionError");
+    if (typeof handleOperatorSessionError !== "function") throw new Error("GatewayDirectTransport.handleOperatorSessionError is unavailable");
+    handleOperatorSessionError.call(gateway, new GatewayConnectError("higher role than currently approved", {
+      details: { requestId: "6fbee43c-5f38-4c2b-b7b1-13c121edf0b5" },
+    }), session);
+
+    expect(gateway.readyState).toBe(gateway.CONNECTING);
+    expect(gateway.canSendNodeCommandResult()).toBe(true);
+    expect(Reflect.get(gateway, "operatorSession")).toBeNull();
+    expect(session.close).toHaveBeenCalledTimes(1);
+    expect(messages).toContainEqual({
+      type: "error",
+      error: "higher role than currently approved",
+      requestId: "6fbee43c-5f38-4c2b-b7b1-13c121edf0b5",
       pauseReconnect: true,
     });
   });

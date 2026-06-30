@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   gatewayApprovalResolveRequest,
+  gatewayNodeApprovalRefreshRequest,
   gatewayNodeCommandResultRequest,
   gatewaySessionConfigGetRequest,
   gatewaySessionListRequest,
@@ -44,6 +45,9 @@ describe("gateway outbox messages", () => {
   });
 
   it("builds node command result messages", () => {
+    expect(gatewayNodeApprovalRefreshRequest()).toEqual({
+      type: "eveng2.node.approval.refresh",
+    });
     expect(gatewayNodeCommandResultRequest("cmd-1", true, { status: "ok" })).toEqual({
       type: "eveng2.node.command.result",
       id: "cmd-1",

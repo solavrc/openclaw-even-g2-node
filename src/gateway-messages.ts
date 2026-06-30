@@ -51,7 +51,7 @@ export type GatewayMessage =
   | { type: "eveng2.node.command"; id?: string; nodeId?: string; command?: string; params?: Record<string, unknown>; timeoutMs?: number }
   | { type: "eveng2.node.approval.required"; nodeId?: string; requestId?: string; approvalState?: string; commands?: string[] }
   | { type: "eveng2.node.approval.ready" }
-  | { type: "error"; id?: string; error: string; pauseReconnect?: boolean }
+  | { type: "error"; id?: string; error: string; requestId?: string; pauseReconnect?: boolean }
   | { type: "pong"; ts: number };
 
 export type GatewayTransport = Pick<WebSocket, "readyState" | "send" | "close" | "addEventListener"> & {
@@ -192,7 +192,58 @@ export function gatewayApprovalUpdate(
 }
 
 export function gatewayErrorStatusFromMessage(message: GatewayErrorMessage) {
-  return `error: ${message.error}`;
+  const requestId = typeof message.requestId === "string" ? message.requestId.trim() : "";
+  return `error: ${message.error}${requestId ? ` (requestId: ${requestId})` : ""}`;
+}
+
+function normalizedNodeApprovalState(approvalState: string | undefined) {
+  return approvalState?.toLowerCase() || "";
+}
+
+function nodeApprovalStatePending(approvalState: string | undefined) {
+  const normalized = normalizedNodeApprovalState(approvalState);
+  return normalized === "pending-approval" || normalized === "pending-reapproval";
+}
+
+function hasPendingNodeRequest(snapshot: EvenG2NodeSnapshot) {
+  return Boolean(snapshot.pendingRequestId?.trim());
+}
+
+export function nodeApprovalStateApproved(approvalState: string | undefined) {
+  const normalized = normalizedNodeApprovalState(approvalState);
+  return normalized === "approved";
+}
+
+export function nodeApprovalStateExplicitlyReady(approvalState: string | undefined) {
+  const normalized = normalizedNodeApprovalState(approvalState);
+  return normalized === "approved" || normalized === "ready";
+}
+
+function uniqueStrings(values: Array<string | undefined>) {
+  return [...new Set(values.map((value) => value?.trim() || "").filter(Boolean))];
+}
+
+export function nodeApprovalRequiredFromSnapshot(snapshot: EvenG2NodeSnapshot | null): NodeApprovalRequired | null {
+  if (!snapshot) return null;
+  const pendingApproval = nodeApprovalStatePending(snapshot.approvalState)
+    || (hasPendingNodeRequest(snapshot) && !nodeApprovalStateExplicitlyReady(snapshot.approvalState));
+  if (!pendingApproval) return null;
+  return {
+    type: "eveng2.node.approval.required",
+    nodeId: snapshot.nodeId,
+    approvalState: snapshot.approvalState || "pending-approval",
+    commands: uniqueStrings([
+      ...(snapshot.openclaw?.commands || []),
+      ...(snapshot.canvas?.commands || []),
+    ]),
+  };
+}
+
+export function nodeApprovalReadySnapshot(snapshot: EvenG2NodeSnapshot | null): EvenG2NodeSnapshot | null {
+  if (!snapshot) return null;
+  const nextSnapshot: EvenG2NodeSnapshot = { ...snapshot, approvalState: "approved" };
+  delete nextSnapshot.pendingRequestId;
+  return nextSnapshot;
 }
 
 export function sessionKeyFromConfigOrSwitchMessage(
@@ -213,12 +264,14 @@ export function runtimeStatusSessionUpdate(
 ) {
   const nextSessionKey = sessionKeyFromRuntimeStatusMessage(message);
   const hasNodeSnapshot = Object.prototype.hasOwnProperty.call(message, "node");
+  const nodeSnapshot = hasNodeSnapshot ? message.node || null : null;
   return {
     nextSessionKey,
     changed: Boolean(nextSessionKey && nextSessionKey !== currentSessionKey),
     shouldRequestTranscript: Boolean(nextSessionKey && nextSessionKey !== currentSessionKey),
     hasNodeSnapshot,
-    nodeSnapshot: hasNodeSnapshot ? message.node || null : null,
+    nodeSnapshot,
+    nodeApprovalRequired: nodeApprovalRequiredFromSnapshot(nodeSnapshot),
   };
 }
 

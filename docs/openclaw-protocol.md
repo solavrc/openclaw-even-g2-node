@@ -1,6 +1,6 @@
 # OpenClaw Protocol Notes
 
-Last reviewed: 2026-06-29.
+Last reviewed: 2026-06-30.
 
 This note records how OpenClaw Node for Even G2 should use OpenClaw Gateway
 protocol surfaces. It is implementation guidance for this repository, not an
@@ -61,8 +61,8 @@ openclaw nodes list
 openclaw nodes describe --node <nodeId> --json
 ```
 
-Useful fields are `clientId`, `clientMode`, `platform`, `deviceFamily`,
-`approvalState`, `pendingRequestId`, `pendingDeclaredCaps`, and
+Useful host-side fields are `clientId`, `clientMode`, `platform`,
+`deviceFamily`, `approvalState`, `pendingRequestId`, `pendingDeclaredCaps`, and
 `pendingDeclaredCommands`. The app also provides
 `pnpm device:preview:latest` and `pnpm device:approve:latest` for local
 development approval loops. Those helpers should only auto-approve requests
@@ -79,11 +79,22 @@ The app must still handle each state independently:
 
 - device pairing / role-upgrade failures from the WebSocket connection;
 - operator approval failures from the bounded operator session;
-- node command approval from `node.pair.list`, `openclaw nodes pending`, or
-  `openclaw nodes describe`, not from a guaranteed WebSocket error string.
+- node command approval from host-side discovery such as
+  `openclaw nodes pending` or `openclaw nodes describe`, not from a guaranteed
+  WebSocket error string.
 
 Do not rely on a Gateway error message containing `node` to detect node command
 approval. Treat that as a fallback hint only.
+
+The phone app intentionally does not request `operator.pairing` or call
+`node.pair.list` just to display a concrete node approval `requestId`.
+`operator.pairing` also gates node approval actions such as approve, reject,
+and remove; combined with this app's operator write scope, that would make the
+operator session capable of approving its own node command request. Treat node
+approval IDs as host/OpenClaw Agent state. Phone guidance should show
+`openclaw nodes pending` followed by `openclaw nodes approve <requestId>`,
+unless OpenClaw later exposes a read-only pending-node surface that cannot
+approve or mutate pairing state.
 
 ## Review Voice Path
 

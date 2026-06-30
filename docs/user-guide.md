@@ -1,6 +1,6 @@
 # User Guide
 
-Last reviewed: 2026-06-27.
+Last reviewed: 2026-06-30.
 
 ## What This Node Does
 
@@ -32,7 +32,9 @@ The first run has three phases:
 3. Ask OpenClaw to show the setup QR, or run `openclaw qr` on the OpenClaw
    host. Then tap `Scan setup QR` and use the Even Hub camera to capture it.
    Some Even Hub WebViews do not expose an in-app live camera preview; the
-   native Even Hub camera flow is the reliable path.
+   native Even Hub camera flow is the reliable path. The app's `Ask OpenClaw`
+   prompts include `solavrc/openclaw-even-g2-node` so the user's normal
+   OpenClaw Agent can use this repository's setup notes when helping.
 4. Approve the first pending OpenClaw device pairing request:
    `openclaw devices list`, then `openclaw devices approve <requestId>`.
    Gateways that know the native Even G2 client id normally approve the node
@@ -46,9 +48,10 @@ The first run has three phases:
    node approval: `openclaw nodes pending`, then
    `openclaw nodes approve <requestId>`. This lets OpenClaw invoke node tools
    such as `canvas.present` and `talk.ptt.once`. It is not always surfaced as
-   a WebSocket connection error, so use `openclaw nodes pending` or
-   `openclaw nodes describe --node "Even G2" --json` when canvas or other
-   node commands are unavailable.
+   a WebSocket connection error, and the app intentionally does not display a
+   concrete node approval request ID. Use `openclaw nodes pending` or
+   `openclaw nodes describe --node "Even G2" --json` on the OpenClaw host when
+   canvas or other node commands are unavailable.
 7. Use the selected OpenClaw session on the glasses. Choose a different session
    from the phone's `Session` selector when needed.
 
@@ -66,16 +69,18 @@ can say or type into their normal OpenClaw session:
 ```text
 OpenClaw Node
 Ask OpenClaw with:
-"Hey Claw, show my Even G2 setup QR."
+"Hey Claw, show my Even G2 setup QR. See solavrc/openclaw-even-g2-node."
 scan QR on phone
 ```
 
-During pairing, the phone status card shows concrete host commands and the
-current request ID when Gateway provides one. The glasses keep the prompt short:
-they show the required approval step and a conversational request the user can
-say or type into their normal OpenClaw session. Some OpenClaw setups skip one
-of these approval requests, so the app names the required action instead of
-presenting a fixed numbered wizard.
+During pairing, the phone status card can show concrete device/operator request
+IDs when Gateway returns them in connection errors. Node command approval is
+different: the app treats concrete node approval request IDs as host/OpenClaw
+Agent state and shows the `openclaw nodes pending` discovery path instead. The
+glasses keep the prompt short: they show the required approval step and a
+conversational request the user can say or type into their normal OpenClaw
+session. Some OpenClaw setups skip one of these approval requests, so the app
+names the required action instead of presenting a fixed numbered wizard.
 
 The onboarding flow is condition-based:
 
@@ -84,9 +89,11 @@ The onboarding flow is condition-based:
 | Setup required | No Gateway setup code is stored on this phone. | Ask OpenClaw for the Even G2 setup QR, or run `openclaw qr`, then scan it. |
 | Device approval required | The setup QR was scanned, but Gateway has not yet trusted the Even G2 device/node identity. This usually appears as a device pairing request. | Approve the Even G2 device request with `openclaw devices list` and `openclaw devices approve <requestId>`, or ask OpenClaw to approve the pending Even G2 setup. |
 | Operator approval required | The device/node identity is trusted, but the bounded operator token is not yet approved. This can appear as a role-upgrade or higher-role request. | Approve the second Even G2 device request. This is the request that lets the phone read sessions and send voice input. If OpenClaw can see multiple pending Even G2 requests, it may approve them in one pass. |
-| Node approval required | The device and operator can be connected, but Gateway still has a pending node command approval. This is visible through `openclaw nodes pending` or `openclaw nodes describe`, not necessarily through a Gateway error message. | Approve the Even G2 node request so OpenClaw can invoke commands such as `canvas.present`, `device.status`, and `talk.ptt.once`. If OpenClaw can see the full pending state, it may approve remaining Even G2 device/operator/node requests together. |
+| Node approval required | The device and operator can be connected, but Gateway still has a pending node command approval. The concrete request ID is intentionally not read from the phone app; find it through `openclaw nodes pending`, `openclaw nodes describe`, or OpenClaw Agent on the host. | Approve the Even G2 node request so OpenClaw can invoke commands such as `canvas.present`, `device.status`, and `talk.ptt.once`. If OpenClaw can see the full pending state, it may approve remaining Even G2 device/operator/node requests together. |
 | Canvas tutorial | Node command approval just became available and the canvas tutorial has not completed yet. | Ask OpenClaw to create a tiny visual surprise for the Even G2 glasses. The tutorial completes when the app receives a real `canvas.present` command. Tap on the glasses skips it. |
 | Origin blocked | The phone reached Gateway, but the WebView Origin is not allowed by `gateway.controlUi.allowedOrigins`. | Add the App origin shown on the phone to Gateway config, restart or reload Gateway if needed, then tap `Retry now`. |
+| Gateway unreachable | The setup code was accepted, but this phone could not complete the Gateway WebSocket connection. | Confirm the Gateway URL is reachable from this phone network. Use a secure WSS route for remote access; plain WS should be local development only. |
+| Even Hub network permission likely blocked | The Gateway URL works from the phone outside Even Hub, but the packaged app is blocked before Gateway answers. | Capture `Advanced diagnostics` and check the Even Hub network permission for that origin. |
 | Ready | The operator session is connected and the app can read the selected session. | Use the glasses. Use the phone `Session` selector to switch sessions. |
 
 The app should not assume these states always appear in the same order. Newer
@@ -104,7 +111,7 @@ $ openclaw devices list
 $ openclaw devices approve <current requestId>
 
 Or ask OpenClaw:
-"Hey Claw, approve my pending Even G2 setup."
+"Hey Claw, approve my pending Even G2 setup. See solavrc/openclaw-even-g2-node."
 ```
 
 Glasses example:
@@ -112,7 +119,7 @@ Glasses example:
 ```text
 Device approval required:
 Ask OpenClaw with:
-"Hey Claw, approve my pending Even G2 setup."
+"Hey Claw, approve my pending Even G2 setup. See solavrc/openclaw-even-g2-node."
 ```
 
 If a second device request appears, the app labels it as an operator approval:
@@ -120,16 +127,25 @@ If a second device request appears, the app labels it as an operator approval:
 ```text
 Operator approval required:
 Ask OpenClaw with:
-"Hey Claw, approve remaining Even G2 operator requests."
+"Hey Claw, approve remaining Even G2 operator requests. See solavrc/openclaw-even-g2-node."
 ```
 
 If OpenClaw asks for node command approval:
 
 ```text
 Node approval required:
+Run on OpenClaw host:
+$ openclaw nodes pending
+Find the Even G2 request, then run openclaw nodes approve <requestId>
+
 Ask OpenClaw with:
-"Hey Claw, approve remaining Even G2 node tools."
+"Hey Claw, approve remaining Even G2 node tools. See solavrc/openclaw-even-g2-node."
 ```
+
+After running `openclaw nodes approve <requestId>`, the Gateway may not push the
+updated node state to the phone immediately. If the phone still shows
+`Node approval required`, tap `Check again` in the node status card. This
+refreshes Gateway state without clearing pairing or scanning a new setup QR.
 
 ## Reset Pairing
 
@@ -154,6 +170,10 @@ card. Check pending requests on the OpenClaw host with `openclaw devices list`
 and `openclaw nodes pending`, then approve pending Even G2 requests, tap
 `Retry now`, or use `Connection` -> `Set up again` to clear local pairing and
 scan a fresh setup QR.
+
+`Retry now` is for reconnecting when the Gateway is disconnected or auth is
+paused. `Check again` is for refreshing already-connected setup state after a
+node approval command has been run on the OpenClaw host.
 
 If the app shows `origin not allowed`, the phone reached OpenClaw but the
 Gateway rejected the browser Origin sent by the Even Hub app. The node status
@@ -257,6 +277,13 @@ text during recording. Some Gateway/provider configurations may return only the
 final transcript after the user stops. The app displays partial text whenever
 OpenClaw sends it and otherwise waits for the final transcript.
 
+Treat voice as a post-pairing verification step, not a blocker for the first
+selected-session screen. After `Review provider listed`, make one short Review
+recording from the glasses. Review is verified when OpenClaw returns transcript
+text and the glasses show the send/discard confirmation. If that first recording
+fails, keep the exact Gateway/provider error visible and repair Gateway voice
+setup instead of moving provider credentials into the Even Hub app.
+
 If voice input is disabled, selected-session taps do not start recording.
 
 Gateway setup differs by routing mode. For a concise setup note that can be
@@ -333,6 +360,8 @@ on the glasses.
 The phone screen intentionally avoids becoming the primary product surface. It
 shows:
 
+- a readiness checklist for setup, Gateway route, approvals, selected session,
+  live G2 bridge, and voice verification,
 - connection state,
 - glass pairing state,
 - current session,
@@ -343,3 +372,10 @@ shows:
 The phone keeps setup and recovery controls visible. `Scan setup QR` uses the
 Even Hub camera flow when live preview is unavailable in the WebView. Manual
 setup-code entry is only a last-resort fallback.
+
+Readiness remains visible after first onboarding completes because the same
+checks can need repair later: Gateway reachability, node tool approval, G2
+bridge availability, selected session, and voice verification can all regress
+independently. The top `Node` card stays intentionally compact: it shows the
+overall state and one primary next action, while detailed facts live in the
+readiness checklist and diagnostics.

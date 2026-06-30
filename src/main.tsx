@@ -18,6 +18,9 @@ import { parseGatewayMessageData, parseVoiceGatewayMessageData } from "./gateway
 import {
   gatewayApprovalUpdate,
   gatewayErrorStatusFromMessage,
+  nodeApprovalReadySnapshot,
+  nodeApprovalRequiredFromSnapshot,
+  nodeApprovalStateExplicitlyReady,
   runtimeStatusSessionUpdate,
   sessionConfigOrSwitchUpdate,
   sessionSendAckMatchesCurrentSession,
@@ -225,6 +228,7 @@ import {
 import { attachCurrentGatewayTransportListeners } from "./gateway-transport-controller";
 import {
   gatewayApprovalResolveRequest,
+  gatewayNodeApprovalRefreshRequest,
   gatewayNodeCommandResultRequest,
   gatewaySessionSendRequest,
   gatewaySessionSwitchRequest,
@@ -237,13 +241,14 @@ import {
 import { createRequestId } from "./request-id";
 import { clearWindowTimeoutRef } from "./timer-ref";
 import {
+  connectionIssueKind as phoneConnectionIssueKind,
   connectionStateLabel,
   hasGatewaySetup as hasGatewaySetupUrl,
   liveActionLabel as phoneLiveActionLabel,
-  liveFacts as phoneLiveFacts,
   liveStateLabel as phoneLiveStateLabel,
   nodeDetailText,
   nodeStatusLabel as phoneNodeStatusLabel,
+  readinessChecklist as phoneReadinessChecklist,
   retryStatusLabel as phoneRetryStatusLabel,
   selectedReviewProviderMissing as phoneSelectedReviewProviderMissing,
   shouldShowCanvasTutorial,
@@ -292,7 +297,6 @@ import {
   normalizeVoiceMode,
   normalizeVoiceRecordingLimitSeconds,
   voiceHardStopTimeoutMs,
-  voiceCapabilityStatus,
   voiceModeGatewayGuidance,
   voiceModeLabel,
   voiceRecoveryAction,
@@ -436,9 +440,14 @@ type EvenHubLifecycleRouteResult = ReturnType<typeof evenHubLifecycleRoute>;
 type SessionTranscriptSnapshotUpdate = ReturnType<typeof sessionTranscriptSnapshotUpdate>;
 type CanvasMessageKind = Extract<CanvasPresentationKind, "message" | "notification">;
 
+function talkReviewProviderId(status: TalkCatalogReviewStatus) {
+  return "providerId" in status ? status.providerId || "" : "";
+}
+
 export function App() {
   const initial = useMemo(loadSettings, []);
   const initialE2eVoiceMode = useMemo(() => e2eVoiceModeFromSearch(window.location.search), []);
+  const devInitialPanel = useMemo(initialPhonePanel, []);
   const shouldProcessLifecycleAction = useMemo(() => createEvenHubLifecycleDedupe(), []);
   const [gatewayUrl, setGatewayUrl] = useState(initial.gatewayUrl);
   const [setupCodeDraft, setSetupCodeDraft] = useState(initial.gatewayUrl);
@@ -461,6 +470,9 @@ export function App() {
     normalizeVoiceRecordingLimitSeconds(initial.voiceRecordingLimitSeconds),
   );
   const [lastVoiceFailure, setLastVoiceFailure] = useState<VoiceFailure | null>(null);
+  const [reviewVoiceVerifiedAtMs, setReviewVoiceVerifiedAtMs] = useState<number | null>(null);
+  const [reviewVoiceVerifiedProviderId, setReviewVoiceVerifiedProviderId] = useState("");
+  const [voicePanelOpen, setVoicePanelOpen] = useState(devInitialPanel === "voice");
   const [voiceDraft, setVoiceDraft] = useState<VoiceDraft | null>(null);
   const [voiceDraftPendingPhase, setVoiceDraftPendingPhase] = useState<VoiceDraftPendingPhase>("preprocess");
   const [canvasTutorialPending, setCanvasTutorialPending] = useState(false);
@@ -529,6 +541,7 @@ export function App() {
   const canvasRestoreTimerRef = useRef<number | null>(null);
   const canvasTutorialPendingRef = useRef(false);
   const canvasTutorialCompletedRef = useRef(initial.canvasTutorialCompleted === true);
+  const nodeApprovalStatusRef = useRef<NodeApprovalRequired | null>(null);
   const glassPreviewTextRef = useRef("OpenClaw Node ready");
   const latestDeviceStatusRef = useRef<DeviceStatus | null>(null);
   const latestDeviceInfoRef = useRef<DeviceInfo | null>(null);
@@ -605,6 +618,11 @@ export function App() {
     });
   }
 
+  function markActiveNodeApprovalReady() {
+    const nextSnapshot = nodeApprovalReadySnapshot(nodeSnapshotRef.current);
+    if (nextSnapshot) setActiveNodeSnapshot(nextSnapshot);
+  }
+
   function setActiveGatewayUrl(nextGatewayUrl: string, options: { setupDraft?: boolean } = {}) {
     if (gatewayUrlRef.current !== nextGatewayUrl) {
       gatewayUrlRef.current = nextGatewayUrl;
@@ -623,12 +641,14 @@ export function App() {
     if (voiceModeRef.current === nextVoiceMode) return;
     voiceModeRef.current = nextVoiceMode;
     setVoiceMode(nextVoiceMode);
+    clearReviewVoiceVerification();
   }
 
   function setActivePreferredReviewProvider(nextProvider: string) {
     if (preferredReviewProviderRef.current === nextProvider) return;
     preferredReviewProviderRef.current = nextProvider;
     setPreferredReviewProvider(nextProvider);
+    clearReviewVoiceVerification();
   }
 
   function setActiveVoiceRecordingLimitSeconds(nextLimitSeconds: unknown) {
@@ -979,6 +999,11 @@ export function App() {
     setCanvasTutorialPending(pending);
   }
 
+  function setActiveNodeApprovalStatus(nextStatus: NodeApprovalRequired | null) {
+    nodeApprovalStatusRef.current = nextStatus;
+    setNodeApprovalStatus(nextStatus);
+  }
+
   function getActiveSessionLabel() {
     const activeKey = sessionKeyRef.current;
     const currentSessions = currentDisplaySessions();
@@ -999,6 +1024,16 @@ export function App() {
     resetSessionLogCursor();
   }
 
+  function clearReviewVoiceVerification() {
+    setReviewVoiceVerifiedAtMs(null);
+    setReviewVoiceVerifiedProviderId("");
+  }
+
+  function markReviewVoiceVerified(providerId = "") {
+    setReviewVoiceVerifiedAtMs(Date.now());
+    setReviewVoiceVerifiedProviderId(providerId || talkReviewProviderId(talkReviewStatusRef.current));
+  }
+
   function clearSessionTranscriptLoadingState() {
     sessionTranscriptLoadingLimitRef.current = null;
     pendingHistoryExpandRef.current = null;
@@ -1010,7 +1045,8 @@ export function App() {
     applySessionList([]);
     setActiveNodeSnapshot(null);
     setActivePendingApproval(null);
-    setNodeApprovalStatus(null);
+    setActiveNodeApprovalStatus(null);
+    clearReviewVoiceVerification();
   }
 
   function maxSessionLogCursor(messages = sessionTranscriptRef.current) {
@@ -1771,10 +1807,35 @@ export function App() {
 
   function retryNow() {
     if (!gatewayUrlRef.current.trim() || connectedRef.current) return;
+    reconnectGatewayNow("retrying now");
+  }
+
+  function reconnectGatewayNow(statusText: string) {
+    if (!gatewayUrlRef.current.trim()) return;
     reconnectPausedRef.current = false;
     clearReconnectTimer();
-    setStatus("retrying now");
+    setStatus(statusText);
     connect();
+  }
+
+  function checkGatewayStatus() {
+    if (!gatewayUrlRef.current.trim()) return;
+    const ws = wsRef.current;
+    if (!ws || !isGatewayTransportOpen(ws.readyState, WebSocket.OPEN)) {
+      retryNow();
+      return;
+    }
+    reconnectPausedRef.current = false;
+    clearReconnectTimer();
+    setStatus("node approval required; checking");
+    sendGatewayOutboxRequest(ws, gatewayNodeApprovalRefreshRequest());
+    sendGatewaySessionBootstrapRequests(ws);
+    requestSessionTranscript(sessionKeyRef.current, { force: true });
+    void refreshTalkReviewStatus({ silent: true });
+  }
+
+  function openVoiceSetupPanel() {
+    setVoicePanelOpen(true);
   }
 
   function disconnect() {
@@ -1970,11 +2031,29 @@ export function App() {
   function handleGatewayReadyOrRuntimeStatus(msg: GatewayReadyOrRuntimeStatusMessage) {
     if (msg.type === "eveng2.runtime.status") {
       const update = runtimeStatusSessionUpdate(msg, sessionKeyRef.current);
+      const hadPendingNodeApproval = Boolean(
+        nodeApprovalStatusRef.current || nodeApprovalRequiredFromSnapshot(nodeSnapshotRef.current),
+      );
       if (update.nextSessionKey) {
         setActiveSessionKey(update.nextSessionKey);
         if (update.shouldRequestTranscript) requestSessionTranscript(update.nextSessionKey);
       }
       if (update.hasNodeSnapshot) setActiveNodeSnapshot(update.nodeSnapshot);
+      if (update.nodeApprovalRequired) {
+        setActiveNodeApprovalStatus({ ...update.nodeApprovalRequired, requestId: undefined });
+        const nextStatus = nodeApprovalRequiredStatus();
+        setStatus(nextStatus);
+        void renderConnectionGuidance(nextStatus);
+        return;
+      }
+      const approvalState = update.nodeSnapshot?.approvalState;
+      if (nodeApprovalStateExplicitlyReady(approvalState)) {
+        setActiveNodeApprovalStatus(null);
+        if (hadPendingNodeApproval && !canvasTutorialCompletedRef.current) {
+          renderCanvasTutorial();
+          return;
+        }
+      }
     }
     if (!pendingSessionVoiceRef.current) setStatus("ready");
     if (glassViewRef.current === "sessionHome") renderGlassSessionHome("ready");
@@ -1983,13 +2062,14 @@ export function App() {
   function handleGatewayNodeApprovalMessage(msg: GatewayNodeApprovalMessage) {
     if (msg.type === "eveng2.node.approval.required") {
       if (msg.nodeId) mergeActiveNodeSnapshot({ nodeId: msg.nodeId });
-      setNodeApprovalStatus(msg);
-      const nextStatus = nodeApprovalRequiredStatus(msg.requestId);
+      setActiveNodeApprovalStatus({ ...msg, requestId: undefined });
+      const nextStatus = nodeApprovalRequiredStatus();
       setStatus(nextStatus);
       void renderConnectionGuidance(nextStatus);
       return;
     }
-    setNodeApprovalStatus(null);
+    setActiveNodeApprovalStatus(null);
+    markActiveNodeApprovalReady();
     if (!canvasTutorialCompletedRef.current) {
       renderCanvasTutorial();
       return;
@@ -2600,7 +2680,10 @@ export function App() {
       fallbackMode: voiceModeRef.current,
       at: Date.now(),
     });
-    if (plan.voiceFailure) setLastVoiceFailure(plan.voiceFailure);
+    if (plan.voiceFailure) {
+      setLastVoiceFailure(plan.voiceFailure);
+      clearReviewVoiceVerification();
+    }
     if (plan.nodeCommandResult) {
       completePendingNodeVoiceCommand(plan.nodeCommandResult);
     }
@@ -2649,6 +2732,9 @@ export function App() {
     });
     setActiveVoiceDraft(plan.draft);
     setLastVoiceFailure(null);
+    if ((pendingSessionVoice?.mode || voiceModeRef.current) === "review") {
+      markReviewVoiceVerified(pendingSessionVoice?.transcriptionProvider);
+    }
     setStatus(plan.status);
     renderGlassVoiceDraft(plan.draft);
   }
@@ -2664,6 +2750,7 @@ export function App() {
     });
     if (plan.shouldClearPendingSessionVoice) clearPendingSessionVoice();
     setLastVoiceFailure(plan.voiceFailure);
+    clearReviewVoiceVerification();
     applyReviewFailureFromVoice(plan.errorText, pendingSessionVoice);
     closeVoiceTransportWithoutFinalize();
     setStatus(voiceFailureStatus(plan.errorText));
@@ -2782,7 +2869,10 @@ export function App() {
       sendPlannedNodeCommandResult(plan.nodeCommandResult);
     }
     setStatus(voiceFailureStatus(errorText));
-    if (plan.voiceFailure) setLastVoiceFailure(plan.voiceFailure);
+    if (plan.voiceFailure) {
+      setLastVoiceFailure(plan.voiceFailure);
+      clearReviewVoiceVerification();
+    }
     if (plan.shouldRenderFailure) renderGlassVoiceFailure(errorText);
   }
 
@@ -3044,17 +3134,29 @@ export function App() {
     hasGatewaySetup,
     activeSessionLabel,
   });
+  const displayedNodeApprovalStatus = nodeApprovalStatus || nodeApprovalRequiredFromSnapshot(nodeSnapshot);
   const statusGuidance = guidanceForConnectionState(status, Boolean(gatewayUrl.trim()));
-  const connectionGuidance = nodeApprovalStatus
-    ? nodeApprovalGuidance(nodeApprovalStatus.requestId)
-    : !connected
-      ? statusGuidance
-      : null;
+  const connectionGuidance = displayedNodeApprovalStatus
+    ? nodeApprovalGuidance()
+    : statusGuidance;
   const storedGatewayLabel = hasGatewaySetup ? shortText(storageSafeGatewayUrl(gatewayUrl), 120) : "";
   const appOrigin = currentAppOrigin();
   const originNotAllowed = /origin not allowed|allowedorigins/i.test(status);
   const retryStatusLabel = phoneRetryStatusLabel(retryDueAtMs, retryClockMs);
+  const connectionIssue = phoneConnectionIssueKind({
+    connected,
+    hasGatewaySetup,
+    status,
+  });
   const showRetryNow = hasGatewaySetup && !connected;
+  const showOperatorApprovalCheck = hasGatewaySetup &&
+    connected &&
+    !displayedNodeApprovalStatus &&
+    connectionGuidance?.title === "Operator approval required";
+  const showCheckAgain = hasGatewaySetup && connected && (
+    Boolean(displayedNodeApprovalStatus) ||
+    showOperatorApprovalCheck
+  );
   const voiceGatewayGuidance = voiceModeGatewayGuidance(voiceMode);
   const showSetupFlow = !hasGatewaySetup;
   const showCanvasTutorial = shouldShowCanvasTutorial({
@@ -3062,22 +3164,43 @@ export function App() {
     completed: canvasTutorialCompleted,
     showSetupFlow,
   });
-  const liveStateLabel = phoneLiveStateLabel({ hasGatewaySetup, connected, nodeConnected });
-  const liveFacts = phoneLiveFacts({
-    connected,
+  const displayedTalkReviewStatus = applyReviewVoiceFailure(talkReviewStatus, lastVoiceFailure);
+  const showVoiceSetupAction = hasGatewaySetup &&
+    connected &&
+    voiceMode === "review" &&
+    !showCheckAgain &&
+    (displayedTalkReviewStatus.state === "needs-setup" || displayedTalkReviewStatus.state === "unavailable");
+  const liveStateLabel = phoneLiveStateLabel({
     hasGatewaySetup,
+    connected,
+    nodeApprovalPending: Boolean(displayedNodeApprovalStatus),
     nodeConnected,
-    foregroundClientCount,
-    nodeApprovalPending: Boolean(nodeApprovalStatus),
-    showCanvasTutorial,
   });
-  const liveActionLabel = phoneLiveActionLabel({ showSetupFlow, showRetryNow });
+  const liveActionLabel = phoneLiveActionLabel({ showSetupFlow, showCheckAgain, showRetryNow, showVoiceSetup: showVoiceSetupAction });
   const showEventDiagnostics = evenHubEventUiDiagnosticsEnabled() || Boolean(sessionTranscriptError);
   const voiceEnabled = voiceMode !== "off";
   const reviewSelected = voiceMode === "review";
-  const displayedTalkReviewStatus = applyReviewVoiceFailure(talkReviewStatus, lastVoiceFailure);
-  const voiceStatusLabel = hasGatewaySetup ? voiceCapabilityStatus(voiceMode, displayedTalkReviewStatus, connected) : "voice setup after pairing";
-  const devInitialPanel = initialPhonePanel();
+  const reviewVoiceVerifiedForCurrentProvider = Boolean(
+    reviewVoiceVerifiedAtMs &&
+    displayedTalkReviewStatus.state === "ready" &&
+    talkReviewProviderId(displayedTalkReviewStatus) &&
+    reviewVoiceVerifiedProviderId === talkReviewProviderId(displayedTalkReviewStatus),
+  );
+  const readinessItems = phoneReadinessChecklist({
+    connected,
+    connectionGuidanceTitle: connectionGuidance?.title,
+    connectionIssue,
+    foregroundClientCount,
+    gatewayUrl,
+    hasGatewaySetup,
+    nodeApprovalPending: Boolean(displayedNodeApprovalStatus),
+    nodeConnected,
+    reviewStatusState: displayedTalkReviewStatus.state,
+    reviewVoiceVerified: reviewVoiceVerifiedForCurrentProvider,
+    sessionKey,
+    showCanvasTutorial,
+    voiceMode,
+  });
   const showGatewaySetupRequest = Boolean(voiceGatewayGuidance.request) && voiceMode !== "off";
   const voiceFailureTitleText = lastVoiceFailure ? voiceRecoveryTitle(lastVoiceFailure.error, lastVoiceFailure.mode) : "";
   const voiceFailureActionText = lastVoiceFailure ? voiceRecoveryAction(lastVoiceFailure.error, lastVoiceFailure.mode) : "";
@@ -3088,8 +3211,31 @@ export function App() {
   const voiceModeLabelText = voiceModeLabel(voiceMode);
   const diagnosticsDeviceId = nodeSnapshot?.deviceId || "";
   const diagnosticsNodeId = nodeSnapshot?.nodeId || lastSeenNodeId;
-  const diagnosticsNodeApprovalState = nodeApprovalStatus?.approvalState || nodeSnapshot?.approvalState || "";
-  const diagnosticsNodePendingRequestId = nodeApprovalStatus?.requestId || nodeSnapshot?.pendingRequestId || "";
+  const diagnosticsNodeApprovalState = displayedNodeApprovalStatus?.approvalState || nodeSnapshot?.approvalState || "";
+
+  function handleNodeLiveAction() {
+    if (showSetupFlow) {
+      void scanSetupQr();
+      return;
+    }
+    if (showRetryNow) {
+      retryNow();
+      return;
+    }
+    if (showCheckAgain) {
+      if (showOperatorApprovalCheck) {
+        reconnectGatewayNow("checking operator approval");
+        return;
+      }
+      checkGatewayStatus();
+      return;
+    }
+    if (showVoiceSetupAction) {
+      openVoiceSetupPanel();
+      return;
+    }
+    retryNow();
+  }
 
   useEffect(() => {
     if (!simulatorSessionSelectorFlowEnabled() || simulatorSessionSelectorFlowRanRef.current) return;
@@ -3132,18 +3278,15 @@ export function App() {
         <NodeLiveStatusPanel
           appOrigin={appOrigin}
           connectionGuidance={connectionGuidance}
-          connectionState={connectionState}
           liveActionLabel={liveActionLabel}
-          liveFacts={liveFacts}
           liveStateLabel={liveStateLabel}
           originNotAllowed={originNotAllowed}
+          readinessItems={readinessItems}
           setupScanStatus={setupScanStatus}
-          status={status}
           voiceFailureActionText={voiceFailureActionText}
           voiceFailureErrorText={shortText(voiceFailureErrorText, 220)}
           voiceFailureTitleText={lastVoiceFailure ? voiceFailureTitleText : ""}
-          voiceStatusLabel={voiceStatusLabel}
-          onLiveAction={showSetupFlow ? () => void scanSetupQr() : retryNow}
+          onLiveAction={handleNodeLiveAction}
         />
 
         {setupScannerOpen ? (
@@ -3188,7 +3331,11 @@ export function App() {
         ) : null}
 
         {!showSetupFlow ? (
-          <details className={styles.advanced} open={devInitialPanel === "voice" || undefined}>
+          <details
+            className={styles.advanced}
+            open={voicePanelOpen}
+            onToggle={(event) => setVoicePanelOpen((event.currentTarget as HTMLDetailsElement).open)}
+          >
             <summary>Voice input</summary>
             <section className={styles["voice-settings"]} aria-label="Voice input settings">
               <VoiceModeControls
@@ -3221,6 +3368,8 @@ export function App() {
                 <ReviewAvailabilityPanel
                   connected={connected}
                   preferredReviewProvider={preferredReviewProvider}
+                  reviewVoiceVerifiedAtMs={reviewVoiceVerifiedAtMs}
+                  reviewVoiceVerifiedProviderId={reviewVoiceVerifiedProviderId}
                   selectedReviewProviderMissing={selectedReviewProviderMissing}
                   status={displayedTalkReviewStatus}
                   onCheckAgain={() => {
@@ -3267,7 +3416,6 @@ export function App() {
           nodeApprovalState={diagnosticsNodeApprovalState}
           nodeDetail={nodeDetail}
           nodeId={diagnosticsNodeId}
-          nodePendingRequestId={diagnosticsNodePendingRequestId}
           nodeStatusLabel={nodeStatusLabel}
           sessionKey={sessionKey}
           sessionTranscriptError={sessionTranscriptError}

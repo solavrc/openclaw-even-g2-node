@@ -3,6 +3,7 @@ import {
   connectionErrorPresentationPlan,
   gatewayConnectingHudFrame,
   guidanceForConnectionState,
+  nodeApprovalGuidance,
   setupCodeInvalidHudFrame,
   setupCodeMissingHudFrame,
   setupQrNotFoundHudFrame,
@@ -16,6 +17,43 @@ describe("guidanceForConnectionState", () => {
     expect(guidanceForConnectionState("setup required", false)).toMatchObject({
       title: "OpenClaw Node",
     });
+  });
+
+  it("keeps node approval request ids on the OpenClaw host side", () => {
+    const guidance = guidanceForConnectionState("node approval required (requestId: request-pending)", true);
+
+    expect(guidance?.title).toBe("Node approval required");
+    expect(guidance?.action).toContain("$ openclaw nodes pending");
+    expect(guidance?.action).toContain("Find the Even G2 request, then run `openclaw nodes approve <requestId>`");
+    expect(guidance?.action).not.toContain("$ openclaw nodes approve request-pending");
+  });
+
+  it("treats spaced role upgrade errors as operator approval", () => {
+    const guidance = guidanceForConnectionState("error: role upgrade required", true);
+
+    expect(guidance?.title).toBe("Operator approval required");
+    expect(guidance?.action).toContain("$ openclaw devices list");
+    expect(guidance?.action).toContain("Hey Claw, approve remaining Even G2 operator requests.");
+  });
+
+  it("renders safe non-UUID operator approval request ids as host commands", () => {
+    const guidance = guidanceForConnectionState("error: role upgrade required (requestId: request-1)", true);
+
+    expect(guidance?.title).toBe("Operator approval required");
+    expect(guidance?.action).toContain("$ openclaw devices approve request-1");
+  });
+
+  it("does not render unsafe or truncated node request ids as commands", () => {
+    const truncated = guidanceForConnectionState(
+      "node approval required (requestId: c8143076-345e-4083-8c86-6411123",
+      true,
+    );
+    const unsafe = nodeApprovalGuidance();
+
+    expect(truncated?.action).toContain("Find the Even G2 request, then run `openclaw nodes approve <requestId>`");
+    expect(truncated?.action).not.toContain("6411123");
+    expect(unsafe.action).toContain("Find the Even G2 request, then run `openclaw nodes approve <requestId>`");
+    expect(unsafe.action).not.toContain("request-pending;rm");
   });
 });
 

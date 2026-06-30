@@ -168,7 +168,7 @@ export async function openClawAskCanvasDataUrl({ ask, header, hint = "" }: OpenC
   const logo = await openClawLogoImage();
   context.save();
   context.globalAlpha = 0.26;
-  context.drawImage(logo, 226, 174, 322, 66);
+  context.drawImage(logo, 226, 186, 322, 66);
   context.restore();
 
   context.fillStyle = "white";

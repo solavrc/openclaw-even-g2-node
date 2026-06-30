@@ -107,12 +107,14 @@ describe("phone setup surface", () => {
     expect(document.querySelector('[aria-label="Scan setup QR"]')?.textContent).toBe("Scan setup QR");
     expect(document.querySelector('[aria-label="Node status"]')).toBeNull();
     expect(document.querySelector('[aria-label="Node live status"]')?.textContent).toContain("Setup required");
-    expect(document.querySelector('[aria-label="Node live status"]')?.textContent).toContain("Gateway offline");
-    expect(document.querySelector('[aria-label="Node live status"]')?.textContent).toContain("scan setup QR");
+    expect(document.querySelector('[aria-label="Node live status"]')?.textContent).toContain("Scan setup QR");
     expect(document.querySelector('[aria-label="Node live status"]')?.textContent).toContain("Set up OpenClaw Gateway");
     expect(document.querySelector('[aria-label="Node live status"]')?.textContent).toContain("Or run on OpenClaw host");
     expect(document.querySelector('[aria-label="Node live status"]')?.textContent).toContain("$ openclaw qr");
     expect(document.querySelector('[aria-label="Node live status"]')?.textContent).toContain("Hey Claw, show my Even G2 setup QR.");
+    expect(document.querySelector('[aria-label="Node live status"]')?.textContent).toContain("solavrc/openclaw-even-g2-node");
+    expect(document.querySelector('[aria-label="Readiness checklist"]')?.textContent).toContain("Gateway setup");
+    expect(document.querySelector('[aria-label="Readiness checklist"]')?.textContent).toContain("Voice verification");
     const setupStatusText = document.querySelector('[aria-label="Node live status"]')?.textContent || "";
     expect(setupStatusText.indexOf("Ask OpenClaw with")).toBeGreaterThanOrEqual(0);
     expect(setupStatusText.indexOf("Or run on OpenClaw host")).toBeGreaterThan(setupStatusText.indexOf("Ask OpenClaw with"));
@@ -216,6 +218,7 @@ describe("phone setup surface", () => {
     expect(reviewAvailability?.textContent).toContain("Review status");
     expect(reviewAvailability?.textContent).toContain("Review waits for Gateway");
     expect(reviewAvailability?.textContent).toContain("Waiting for Gateway connection");
+    expect(reviewAvailability?.textContent).toContain("After Gateway setup, verify Review with one short glasses recording.");
     expect((reviewAvailability?.querySelector("button") as HTMLButtonElement | null)?.disabled).toBe(true);
 
     const sendNow = [...document.querySelectorAll("button")]
@@ -364,6 +367,22 @@ describe("phone setup surface", () => {
     expect([...document.querySelectorAll("button")].filter((button) => button.textContent === "Retry now")).toHaveLength(1);
     expect(document.body.textContent).not.toContain("Re-scan setup QR");
     expect(document.body.textContent).not.toContain("Reset pairing");
+  });
+
+  it("lets the development voice panel close after opening it from the URL", async () => {
+    await rerenderWithSearch("/?disableEvenBridge=1&setupCode=wss%3A%2F%2Fgateway.example%2Fws&openPanel=voice");
+
+    const voiceDetails = [...document.querySelectorAll("details")]
+      .find((item) => item.querySelector("summary")?.textContent === "Voice input");
+    if (!voiceDetails) throw new Error("Voice input panel not found");
+    expect(voiceDetails?.open).toBe(true);
+
+    await act(async () => {
+      voiceDetails.open = false;
+      voiceDetails.dispatchEvent(new Event("toggle", { bubbles: true }));
+    });
+
+    expect(voiceDetails.open).toBe(false);
   });
 
   it("sets up again by clearing stored pairing before opening the scanner", async () => {
@@ -532,6 +551,7 @@ describe("connection guidance", () => {
     expect(deviceGuidance?.action).toContain("$ openclaw devices list");
     expect(deviceGuidance?.action).toContain("$ openclaw devices approve 6fbee43c-5f38-4c2b-b7b1-13c121edf0b5");
     expect(deviceGuidance?.action).toContain("Hey Claw, approve my pending Even G2 setup.");
+    expect(deviceGuidance?.action).toContain("solavrc/openclaw-even-g2-node");
 
     const nodeGuidance = guidanceForConnectionState("error: node approval required", true);
     expect(nodeGuidance?.title).toBe("Node approval required");
@@ -539,6 +559,7 @@ describe("connection guidance", () => {
     expect(nodeGuidance?.body).toContain("canvas and push-to-talk");
     expect(nodeGuidance?.action).toContain("$ openclaw nodes pending");
     expect(nodeGuidance?.action).toContain("Hey Claw, approve remaining Even G2 node tools.");
+    expect(nodeGuidance?.action).toContain("solavrc/openclaw-even-g2-node");
 
     const roleGuidance = guidanceForConnectionState("error: higher role than currently approved", true);
     expect(roleGuidance?.title).toBe("Operator approval required");
@@ -548,18 +569,25 @@ describe("connection guidance", () => {
     expect(roleGuidance?.body).not.toContain("bootstrap");
     expect(roleGuidance?.action).toContain("$ openclaw devices list");
     expect(roleGuidance?.action).toContain("Hey Claw, approve remaining Even G2 operator requests.");
+    expect(roleGuidance?.action).toContain("solavrc/openclaw-even-g2-node");
     expect(connectionGuidanceHudText(roleGuidance!)).toContain("Operator approval required");
     expect(connectionGuidanceHudText(roleGuidance!)).toContain("Ask OpenClaw with:");
-    expect(connectionGuidanceHudText(roleGuidance!)).toContain('"Hey Claw, approve remaining Even G2 operator requests."');
+    expect(connectionGuidanceHudText(roleGuidance!)).toContain('"Hey Claw, approve remaining Even G2 operator requests. See solavrc/openclaw-even-g2-node."');
     expect(connectionGuidanceHudText(roleGuidance!)).not.toContain("bootstrap");
     expect(connectionGuidanceHudText(roleGuidance!)).toContain("ask OpenClaw");
     expect(connectionGuidanceHudText(roleGuidance!)).not.toContain("retrying...");
-    expect(connectionGuidanceHudText(roleGuidance!).length).toBeLessThan(260);
+    expect(connectionGuidanceHudText(roleGuidance!).length).toBeLessThan(320);
+
+    const concreteRoleGuidance = guidanceForConnectionState("error: higher role than currently approved (requestId: 6fbee43c-5f38-4c2b-b7b1-13c121edf0b5)", true);
+    expect(concreteRoleGuidance?.title).toBe("Operator approval required");
+    expect(concreteRoleGuidance?.action).toContain("$ openclaw devices approve 6fbee43c-5f38-4c2b-b7b1-13c121edf0b5");
+    expect(concreteRoleGuidance?.action).not.toContain("openclaw devices approve <requestId>");
 
     const deviceHud = connectionGuidanceHudText(deviceGuidance!);
     expect(deviceHud).toContain("Device approval required");
     expect(deviceHud).toContain("Ask OpenClaw with:");
-    expect(deviceHud).toContain('"Hey Claw, approve my pending Even G2 setup."');
+    expect(deviceHud).toContain('"Hey Claw, approve my pending Even G2 setup. See solavrc/openclaw-even-g2-node."');
+    expect(deviceHud).toContain("solavrc/openclaw-even-g2-node");
     expect(deviceHud).toContain("ask OpenClaw");
     expect(deviceHud).not.toContain("$ openclaw devices list");
     expect(deviceHud).not.toContain("6fbee43c-5f38-4c2b-b7b1-13c121edf0b5");
@@ -571,9 +599,10 @@ describe("connection guidance", () => {
     expect(guidance?.action).toContain("Run on OpenClaw host");
     expect(guidance?.action).toContain("$ openclaw qr");
     expect(guidance?.action).toContain("Hey Claw, show my Even G2 setup QR.");
+    expect(guidance?.action).toContain("solavrc/openclaw-even-g2-node");
     expect(connectionGuidanceHudText(guidance!)).not.toContain("$ openclaw qr");
     expect(connectionGuidanceHudText(guidance!)).toContain("Ask OpenClaw with:");
-    expect(connectionGuidanceHudText(guidance!)).toContain('"Hey Claw, show my Even G2 setup QR."');
+    expect(connectionGuidanceHudText(guidance!)).toContain('"Hey Claw, show my Even G2 setup QR. See solavrc/openclaw-even-g2-node."');
     expect(connectionGuidanceHudText(guidance!)).not.toContain("`");
   });
 
@@ -591,7 +620,7 @@ describe("connection guidance", () => {
   it("keeps setup steps in the HUD body and reserves hint for state", () => {
     expect(setupHudFrame()).toEqual({
       header: "OpenClaw Node",
-      body: "Ask OpenClaw with:\n\"Hey Claw, show my Even G2 setup QR.\"",
+      body: "Ask OpenClaw with:\n\"Hey Claw, show my Even G2 setup QR. See solavrc/openclaw-even-g2-node.\"",
       hint: "scan QR on phone",
     });
 
@@ -600,7 +629,8 @@ describe("connection guidance", () => {
 
     expect(frame.header).toBe("OpenClaw Node");
     expect(frame.body).toContain("Ask OpenClaw with:");
-    expect(frame.body).toContain('"Hey Claw, show my Even G2 setup QR."');
+    expect(frame.body).toContain('"Hey Claw, show my Even G2 setup QR. See solavrc/openclaw-even-g2-node."');
+    expect(frame.body).toContain("solavrc/openclaw-even-g2-node");
     expect(frame.hint).toBe("scan QR on phone");
     expect(frame.hint).not.toContain("Hey Claw");
   });
@@ -635,12 +665,27 @@ describe("connection guidance", () => {
     expect(guidance?.body).toContain("Gateway rejected this WebView origin");
     expect(guidance?.action).toContain("App origin");
     expect(guidance?.action).toContain("controlUi.allowedOrigins");
+    expect(guidance?.action).toContain("same secure route");
     expect(guidance?.action).toContain("Retry now");
 
     const hud = connectionGuidanceHudText(guidance!);
     expect(hud).toContain("Allow this app origin");
     expect(hud).toContain("gateway.controlUi.allowedOrigins");
     expect(hud).not.toContain("`");
+  });
+
+  it("separates Gateway reachability from Even Hub network permission failures", () => {
+    const unreachable = guidanceForConnectionState("connection error", true);
+    expect(unreachable?.title).toBe("Gateway unreachable from phone");
+    expect(unreachable?.body).toContain("could not complete the Gateway WebSocket");
+    expect(unreachable?.action).toContain("reachable from this phone network");
+    expect(unreachable?.action).toContain("secure WSS route");
+
+    const evenHubBlocked = guidanceForConnectionState("error: network permission denied: not in whitelist", true);
+    expect(evenHubBlocked?.title).toBe("Even Hub network permission likely blocked");
+    expect(evenHubBlocked?.body).toContain("blocked before the Gateway could answer");
+    expect(evenHubBlocked?.action).toContain("outside Even Hub");
+    expect(evenHubBlocked?.action).toContain("Advanced diagnostics");
   });
 });
 
