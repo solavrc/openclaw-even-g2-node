@@ -114,6 +114,7 @@ export type DeviceIdentitySigner = {
 
 export type DeviceAuthStorage = {
   load(deviceId: string, role: GatewayRole, gatewayUrl?: string): DeviceAuthEntry | null;
+  remove?(deviceId: string, role: GatewayRole, gatewayUrl?: string): void;
   save(deviceId: string, role: GatewayRole, token: string, scopes: string[], gatewayUrl?: string): void;
 };
 
@@ -345,6 +346,13 @@ export class BrowserDeviceAuthStore {
       updatedAtMs: Date.now(),
     };
     this.storage.setItem(AUTH_STORAGE_KEY, JSON.stringify(root));
+  }
+
+  remove(deviceId: string, role: GatewayRole, gatewayUrl = "") {
+    const root = this.loadRoot();
+    delete root[this.key(deviceId, role, gatewayUrl)];
+    if (Object.keys(root).length) this.storage.setItem(AUTH_STORAGE_KEY, JSON.stringify(root));
+    else this.storage.removeItem(AUTH_STORAGE_KEY);
   }
 
   private key(deviceId: string, role: GatewayRole, gatewayUrl: string) {
@@ -682,6 +690,7 @@ export class GatewayWsSession {
   ) {
     if (!this.shouldRetryWithBootstrapAfterStoredTokenFailure(error)) return false;
     this.retriedStoredTokenFailureWithBootstrap = true;
+    this.authStore.remove?.(identity.deviceId, this.options.role, this.options.url);
     const connect = await buildConnectParamsWithAuthPlan({
       identity,
       nonce: this.lastConnectNonce,
@@ -1165,6 +1174,12 @@ export class GatewayDirectTransport extends EventTarget {
   request<T = unknown>(method: string, params?: unknown, timeoutMs?: number): Promise<T> {
     if (!this.operatorSession) return Promise.reject(new Error("operator session is not connected"));
     return this.operatorSession.request<T>(method, params, timeoutMs);
+  }
+
+  retryOperatorApproval() {
+    if (this.readyState === WebSocket.CLOSED || !this.nodeSessionOpen || this.operatorSession) return false;
+    this.connectOperator();
+    return true;
   }
 
   private connectOperator() {

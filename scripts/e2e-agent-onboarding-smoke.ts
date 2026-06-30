@@ -227,21 +227,23 @@ function looksLikePromptEcho(responseText: string, promptText = setupOpenClawAsk
   return withoutCommonPrefix === prompt;
 }
 
-function hostPortFromGatewayUrl(gatewayUrl: string) {
-  try {
-    const parsed = new URL(gatewayUrl);
-    return parsed.host.toLowerCase();
-  } catch {
-    return "";
-  }
-}
-
 function includesGatewayTarget(responseText: string, gatewayUrl: string) {
-  const target = gatewayUrl.trim().toLowerCase();
+  const trimmed = gatewayUrl.trim();
+  if (!trimmed) return true;
+  const target = (() => {
+    try {
+      const parsed = new URL(trimmed);
+      parsed.hash = "";
+      return parsed.toString().toLowerCase();
+    } catch {
+      return trimmed.toLowerCase();
+    }
+  })();
   if (!target) return true;
   const normalized = responseText.toLowerCase();
-  const hostPort = hostPortFromGatewayUrl(target);
-  return normalized.includes(target) || Boolean(hostPort && normalized.includes(hostPort));
+  if (normalized.includes(target)) return true;
+  const rootPathTarget = target.endsWith("/") && !target.includes("?") ? target.slice(0, -1) : "";
+  return Boolean(rootPathTarget && normalized.includes(rootPathTarget));
 }
 
 function containsContainerBridgeAddress(responseText: string) {

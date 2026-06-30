@@ -1792,7 +1792,16 @@ export function App() {
     setRetryDueAtMs(null);
   }
 
-  function scheduleReconnect(reason = "disconnected") {
+  function retryOperatorApprovalNow(statusText: string) {
+    const ws = wsRef.current;
+    if (!(ws instanceof GatewayDirectTransport) || !ws.retryOperatorApproval()) return false;
+    reconnectPausedRef.current = false;
+    clearReconnectTimer();
+    setStatus(statusText);
+    return true;
+  }
+
+  function scheduleReconnect(reason = "disconnected", options: { operatorOnly?: boolean } = {}) {
     if (!gatewayUrlRef.current || connectedRef.current || reconnectTimerRef.current !== null) return;
     const attempt = Math.min(reconnectAttemptRef.current, 5);
     const delayMs = Math.min(MAX_RECONNECT_DELAY_MS, 1000 * (2 ** attempt));
@@ -1802,12 +1811,14 @@ export function App() {
     reconnectTimerRef.current = window.setTimeout(() => {
       reconnectTimerRef.current = null;
       setRetryDueAtMs(null);
+      if (options.operatorOnly && retryOperatorApprovalNow("checking operator approval")) return;
       connect();
     }, delayMs);
   }
 
   function retryNow() {
     if (!gatewayUrlRef.current.trim() || connectedRef.current) return;
+    if (retryOperatorApprovalNow("checking operator approval")) return;
     reconnectGatewayNow("retrying now");
   }
 
@@ -2233,7 +2244,7 @@ export function App() {
     if (plan.target === "guidance") void renderConnectionGuidance(plan.statusText);
     else void renderGlass(plan.frame);
     if ((msg.pauseReconnect !== true || retryAwaitingApproval) && plan.reconnectReason) {
-      scheduleReconnect(retryAwaitingApproval ? nextStatus : plan.reconnectReason);
+      scheduleReconnect(retryAwaitingApproval ? nextStatus : plan.reconnectReason, { operatorOnly: retryAwaitingApproval });
     }
   }
 

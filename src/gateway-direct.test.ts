@@ -345,6 +345,23 @@ describe("Gateway direct setup", () => {
     expect(authStore.load("device-1", "node", "wss://gateway-b.example.test/ws")).toBeNull();
   });
 
+  it("removes only the rejected stored token for the current Gateway URL and role", () => {
+    const authStore = new BrowserDeviceAuthStore(new MemoryStorage());
+    authStore.save("device-1", "node", "node-token", [], "wss://gateway.example.test/ws?setup=secret");
+    authStore.save("device-1", "operator", "operator-token", ["operator.read"], "wss://gateway.example.test/ws?setup=secret");
+    authStore.save("device-1", "node", "other-token", [], "wss://other.example.test/ws");
+
+    authStore.remove("device-1", "node", "wss://gateway.example.test/ws");
+
+    expect(authStore.load("device-1", "node", "wss://gateway.example.test/ws")).toBeNull();
+    expect(authStore.load("device-1", "operator", "wss://gateway.example.test/ws")).toMatchObject({
+      token: "operator-token",
+    });
+    expect(authStore.load("device-1", "node", "wss://other.example.test/ws")).toMatchObject({
+      token: "other-token",
+    });
+  });
+
   it("requests current scopes when reconnecting with a stored device token", async () => {
     vi.spyOn(Date, "now").mockReturnValue(1700000000000);
     const params = await buildConnectParams({
@@ -524,6 +541,7 @@ describe("Gateway session events", () => {
     const retry = lastConnectParams(ws);
     expect(retry.params?.auth).toEqual({ bootstrapToken: "fresh-bootstrap" });
     expect(retry.params?.device?.signature).toContain("v3|device-1|openclaw-even-g2-node|node|node||1700000000000|fresh-bootstrap|nonce-1|even-g2|glasses");
+    expect(authStore.load(identity.deviceId, "node", "wss://gateway.example.test")).toBeNull();
   });
 
   it("ignores late node-open callbacks after the direct transport closes", async () => {
@@ -1878,6 +1896,27 @@ describe("Gateway direct voice", () => {
       requestId: "6fbee43c-5f38-4c2b-b7b1-13c121edf0b5",
       pauseReconnect: true,
     });
+  });
+
+  it("retries operator approval without closing the live node session", async () => {
+    const gateway = new GatewayDirectTransport({
+      setupCodeOrUrl: "ws://127.0.0.1:18789",
+      storage: new MemoryStorage(),
+      token: "",
+      WebSocketCtor: FakeGatewayWebSocketCtor,
+    });
+    const nodeSession = { close: vi.fn() };
+    Reflect.set(gateway, "nodeSession", nodeSession);
+    Reflect.set(gateway, "nodeSessionOpen", true);
+    Reflect.set(gateway, "operatorSession", null);
+
+    expect(gateway.retryOperatorApproval()).toBe(true);
+
+    expect(gateway.readyState).toBe(gateway.CONNECTING);
+    expect(gateway.canSendNodeCommandResult()).toBe(true);
+    expect(nodeSession.close).not.toHaveBeenCalled();
+    expect(Reflect.get(gateway, "operatorSession")).not.toBeNull();
+    await vi.waitFor(() => expect(FakeGatewayWebSocket.instances).toHaveLength(1));
   });
 
   it("closes the transport after transient operator session errors so the app can reconnect", () => {
