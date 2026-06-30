@@ -51,6 +51,8 @@ const ISOLATED_E2E_ADMIN_SCOPES = [
   "operator.talk.secrets",
   "operator.write",
 ];
+const ISOLATED_STATE_MARKER_FILE = ".openclaw-even-g2-node-isolated-state.json";
+const ISOLATED_STATE_MARKER_KIND = "openclaw-even-g2-node.isolated-gateway-state";
 const EVEN_G2_NODE_CAPS = new Set(["canvas", "talk"]);
 const EVEN_G2_NODE_COMMANDS = new Set([
   "canvas.hide",
@@ -151,7 +153,21 @@ function isCliPendingRequest(record: JsonRecord) {
     || readString(record.clientMode)?.toLowerCase() === "cli";
 }
 
+function hasIsolatedStateMarker(stateDir: string) {
+  const markerPath = path.join(stateDir, ISOLATED_STATE_MARKER_FILE);
+  if (!fs.existsSync(markerPath)) return false;
+  try {
+    const marker = asRecord(JSON.parse(fs.readFileSync(markerPath, "utf8")));
+    return readString(marker?.kind) === ISOLATED_STATE_MARKER_KIND;
+  } catch {
+    return false;
+  }
+}
+
 export function grantIsolatedE2eCliAdmin(stateDir: string, scopes = ISOLATED_E2E_ADMIN_SCOPES) {
+  if (!hasIsolatedStateMarker(stateDir)) {
+    return { ok: false, reason: "isolated Gateway state marker missing", changed: false, removedPending: 0 };
+  }
   const pairedPath = path.join(stateDir, "devices", "paired.json");
   if (!fs.existsSync(pairedPath)) return { ok: false, reason: "paired state missing", changed: false, removedPending: 0 };
   const paired = asRecord(JSON.parse(fs.readFileSync(pairedPath, "utf8")));

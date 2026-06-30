@@ -13,6 +13,13 @@ import {
   shouldStopAfterSettle,
 } from "./approve-even-g2-pairing.ts";
 
+function writeIsolatedStateMarker(root: string) {
+  fs.writeFileSync(path.join(root, ".openclaw-even-g2-node-isolated-state.json"), `${JSON.stringify({
+    kind: "openclaw-even-g2-node.isolated-gateway-state",
+    runId: "unit-run",
+  }, null, 2)}\n`);
+}
+
 describe("approve Even G2 pairing helpers", () => {
   it("defaults approve mode to watching and dry-run mode to one pass", () => {
     expect(parseArgs([])).toMatchObject({
@@ -54,6 +61,7 @@ describe("approve Even G2 pairing helpers", () => {
   it("grants isolated E2E CLI admin scopes without touching Even G2 pending requests", () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), "even-g2-approve-helper-"));
     try {
+      writeIsolatedStateMarker(root);
       const devicesDir = path.join(root, "devices");
       fs.mkdirSync(devicesDir, { recursive: true });
       fs.writeFileSync(path.join(devicesDir, "paired.json"), `${JSON.stringify({
@@ -102,6 +110,31 @@ describe("approve Even G2 pairing helpers", () => {
           platform: "even-g2",
         },
       });
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("refuses to mutate state without an isolated Gateway marker", () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "even-g2-approve-helper-"));
+    try {
+      const devicesDir = path.join(root, "devices");
+      fs.mkdirSync(devicesDir, { recursive: true });
+      const pairedPath = path.join(devicesDir, "paired.json");
+      fs.writeFileSync(pairedPath, `${JSON.stringify({
+        "cli-device": {
+          clientId: "cli",
+          clientMode: "cli",
+          scopes: ["operator.read"],
+        },
+      }, null, 2)}\n`);
+      const before = fs.readFileSync(pairedPath, "utf8");
+
+      expect(grantIsolatedE2eCliAdmin(root)).toMatchObject({
+        ok: false,
+        reason: "isolated Gateway state marker missing",
+      });
+      expect(fs.readFileSync(pairedPath, "utf8")).toBe(before);
     } finally {
       fs.rmSync(root, { recursive: true, force: true });
     }

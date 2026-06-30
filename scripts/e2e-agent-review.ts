@@ -188,8 +188,23 @@ export function parseArgs(argv: string[], now = new Date()): ParsedArgs {
   return args;
 }
 
+function looksLikeSetupCodePayload(value: string) {
+  if (!/^[A-Za-z0-9_-]{40,}={0,2}$/.test(value)) return false;
+  try {
+    const decoded = Buffer.from(value, "base64url").toString("utf8");
+    const parsed = JSON.parse(decoded) as unknown;
+    if (!parsed || typeof parsed !== "object") return false;
+    return /bootstrap|setup|token|url/i.test(JSON.stringify(parsed));
+  } catch {
+    return false;
+  }
+}
+
 export function redactText(value: string) {
-  return value
+  const setupCodeRedacted = value.replace(/\b[A-Za-z0-9_-]{40,}={0,2}\b/g, (match) => (
+    looksLikeSetupCodePayload(match) ? "<redacted-setup-code>" : match
+  ));
+  return setupCodeRedacted
     .replace(/("(?:token|secret|authorization|apiKey|api_key|auth|bootstrap|bootstrapToken|bootstrap_token|setup|setupCode|setup_code|setupToken|setup_token)"\s*:\s*")[^"]*(")/gi, "$1<redacted>$2")
     .replace(/(Bearer\s+)[A-Za-z0-9._~+/=-]+/gi, "$1<redacted>")
     .replace(/(--(?:token|openclaw-token|password|api-key|apiKey)\s+)[^\s"']+/gi, "$1<redacted>")
@@ -403,15 +418,35 @@ function nodeRecord(value: unknown): Record<string, unknown> | null {
   return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : null;
 }
 
+function stringArray(value: unknown) {
+  return Array.isArray(value)
+    ? value.map((item) => readString(item).toLowerCase()).filter(Boolean)
+    : [];
+}
+
+function hasEvenG2NodeSurface(entry: Record<string, unknown>) {
+  const caps = [
+    ...stringArray(entry.caps),
+    ...stringArray(entry.declaredCaps),
+    ...stringArray(entry.pendingDeclaredCaps),
+  ];
+  const commands = [
+    ...stringArray(entry.commands),
+    ...stringArray(entry.declaredCommands),
+    ...stringArray(entry.pendingDeclaredCommands),
+  ];
+  return (caps.includes("canvas") && caps.includes("talk"))
+    || (commands.some((command) => command.startsWith("canvas.")) && commands.some((command) => command.startsWith("talk.")));
+}
+
 function isEvenG2NodeRecord(entry: Record<string, unknown>) {
   const displayName = readString(entry.displayName).toLowerCase();
   const platform = readString(entry.platform).toLowerCase();
   const clientId = readString(entry.clientId).toLowerCase();
-  const deviceFamily = readString(entry.deviceFamily).toLowerCase();
   return platform === "even-g2"
     || clientId === "openclaw-even-g2-node"
     || displayName.includes("even g2")
-    || (clientId === "node-host" && deviceFamily === "glasses");
+    || hasEvenG2NodeSurface(entry);
 }
 
 export function resolveConnectedNodeName(requestedNodeName: string, nodeStatus: CommandEvidence | undefined) {

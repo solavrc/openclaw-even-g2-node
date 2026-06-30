@@ -111,6 +111,7 @@ const CONTAINER_STATE_DIR = `${CONTAINER_HOME}/.openclaw`;
 const CONTAINER_WORKSPACE_DIR = `${CONTAINER_STATE_DIR}/workspace`;
 const CONTAINER_AUTH_SEED_DIR = `${CONTAINER_STATE_DIR}/.seed-auth`;
 const CONTAINER_AUTH_PROFILE_SECRET_DIR = `${CONTAINER_HOME}/.config/openclaw`;
+export const ISOLATED_STATE_MARKER_FILE = ".openclaw-even-g2-node-isolated-state.json";
 const DEFAULT_CONTAINER_PORT = 19_001;
 const DEFAULT_CONTROL_ORIGINS = [
   "http://127.0.0.1:5174",
@@ -384,11 +385,12 @@ export function createMinimalOpenClawConfig(input: {
 }): MinimalOpenClawConfig {
   const template = readGatewayConfigTemplate(input.configTemplatePath || MINIMAL_GATEWAY_CONFIG_TEMPLATE_PATH);
   const plugins = uniqueStrings(input.plugins);
+  const requiredPluginIds = template.plugins.entries ? Object.keys(template.plugins.entries) : [];
   const pluginConfig = {
     enabled: template.plugins.enabled,
     ...(template.plugins.entries ? { entries: template.plugins.entries } : {}),
     ...(plugins.length
-      ? { allow: plugins }
+      ? { allow: uniqueStrings([...plugins, ...requiredPluginIds]) }
       : template.plugins.allow
         ? { allow: template.plugins.allow }
         : {}),
@@ -804,6 +806,9 @@ export function buildGatewayPlan(args: ParsedArgs): IsolatedGatewayPlan {
     outDir,
     runId: args.runId,
     setupCodeCommand: [
+      "docker",
+      "exec",
+      args.containerName,
       "openclaw",
       "qr",
       "--url",
@@ -825,7 +830,7 @@ function containerTargetHostPath(plan: IsolatedGatewayPlan, target: string) {
   return path.join(plan.stateDir, target.slice(CONTAINER_STATE_DIR.length + 1));
 }
 
-function preparePlanFiles(plan: IsolatedGatewayPlan) {
+export function preparePlanFiles(plan: IsolatedGatewayPlan) {
   fs.mkdirSync(plan.stateDir, { recursive: true });
   fs.mkdirSync(plan.workspaceDir, { recursive: true });
   for (const mount of plan.mounts) {
@@ -839,6 +844,10 @@ function preparePlanFiles(plan: IsolatedGatewayPlan) {
       fs.closeSync(fs.openSync(targetHostPath, "a"));
     }
   }
+  fs.writeFileSync(path.join(plan.stateDir, ISOLATED_STATE_MARKER_FILE), `${JSON.stringify({
+    kind: "openclaw-even-g2-node.isolated-gateway-state",
+    runId: plan.runId,
+  }, null, 2)}\n`);
   fs.writeFileSync(plan.configPath, `${JSON.stringify(plan.config, null, 2)}\n`);
   fs.writeFileSync(path.join(plan.outDir, "gateway-plan.json"), `${JSON.stringify(planSummary(plan), null, 2)}\n`);
 }
@@ -874,30 +883,17 @@ function stopMatchingContainers() {
   return { list, stopped };
 }
 
-function openClawHostEnv(plan: IsolatedGatewayPlan): NodeJS.ProcessEnv {
-  return {
-    ...process.env,
-    OPENCLAW_AUTH_PROFILE_SECRET_DIR: path.join(plan.outDir, "host-auth-profile-secrets"),
-    OPENCLAW_AUTH_STORE_READONLY: "1",
-    OPENCLAW_CONFIG_DIR: plan.stateDir,
-    OPENCLAW_CONFIG_PATH: plan.configPath,
-    OPENCLAW_GATEWAY_TOKEN: plan.token,
-    OPENCLAW_STATE_DIR: plan.stateDir,
-    OPENCLAW_WORKSPACE_DIR: plan.workspaceDir,
-  };
-}
-
-function runOpenClawForPlan(plan: IsolatedGatewayPlan, args: string[], options?: {
+function runOpenClawInContainer(plan: IsolatedGatewayPlan, args: string[], options?: {
   env?: Record<string, string>;
   timeout?: number;
 }) {
-  return runCommand("openclaw", args, {
-    env: {
-      ...openClawHostEnv(plan),
-      ...options?.env,
-    },
-    timeout: options?.timeout,
-  });
+  return runCommand("docker", [
+    "exec",
+    ...Object.entries(options?.env || {}).flatMap(([key, value]) => ["--env", `${key}=${value}`]),
+    plan.containerName,
+    "openclaw",
+    ...args,
+  ], { timeout: options?.timeout });
 }
 
 async function sleep(ms: number) {
@@ -911,11 +907,11 @@ async function waitForGateway(plan: IsolatedGatewayPlan, waitMs: number) {
   const deadline = Date.now() + waitMs;
   let last = "";
   while (Date.now() < deadline) {
-    const result = runOpenClawForPlan(plan, [
+    const result = runOpenClawInContainer(plan, [
       "gateway",
       "probe",
       "--url",
-      plan.hostGatewayUrl,
+      plan.containerGatewayUrl,
       "--token",
       plan.token,
       "--json",
@@ -931,15 +927,23 @@ async function waitForGateway(plan: IsolatedGatewayPlan, waitMs: number) {
 
 function setupCodeFor(plan: IsolatedGatewayPlan) {
   const setupConfigPath = path.join(plan.stateDir, "openclaw.setup-code.json");
+  const containerSetupConfigPath = `${CONTAINER_STATE_DIR}/openclaw.setup-code.json`;
   fs.writeFileSync(setupConfigPath, `${JSON.stringify(createMinimalOpenClawConfig({
     containerPort: plan.containerPort,
     controlOrigins: plan.config.gateway.controlUi.allowedOrigins,
     plugins: [],
     tokenEnvName: plan.config.gateway.auth.token.id,
   }), null, 2)}\n`);
-  const result = runOpenClawForPlan(plan, plan.setupCodeCommand.slice(1), {
+  const result = runOpenClawInContainer(plan, [
+    "qr",
+    "--url",
+    plan.hostGatewayUrl,
+    "--token",
+    plan.token,
+    "--setup-code-only",
+  ], {
     env: {
-      OPENCLAW_CONFIG_PATH: setupConfigPath,
+      OPENCLAW_CONFIG_PATH: containerSetupConfigPath,
     },
     timeout: 10_000,
   });

@@ -8,8 +8,10 @@ import {
   DOCKER_RUN_TIMEOUT_MS,
   extractSetupCodeOutput,
   FULL_E2E_GATEWAY_CONFIG_TEMPLATE_PATH,
+  ISOLATED_STATE_MARKER_FILE,
   MINIMAL_GATEWAY_CONFIG_TEMPLATE_PATH,
   parseArgs,
+  preparePlanFiles,
 } from "./isolated-openclaw-gateway.ts";
 
 const tempRoots: string[] = [];
@@ -240,10 +242,10 @@ describe("isolated OpenClaw Gateway config", () => {
       configTemplatePath: FULL_E2E_GATEWAY_CONFIG_TEMPLATE_PATH,
       containerPort: 19001,
       controlOrigins: [],
-      plugins: ["voice-call", "xai"],
+      plugins: ["custom-plugin"],
     });
 
-    expect(config.plugins.allow).toEqual(["voice-call", "xai"]);
+    expect(config.plugins.allow).toEqual(["custom-plugin", "codex", "voice-call", "xai"]);
     expect(config.plugins.entries?.["voice-call"]).toMatchObject({
       enabled: true,
       config: {
@@ -347,6 +349,9 @@ describe("isolated OpenClaw Gateway Docker plan", () => {
     expect(plan.hostGatewayUrl).toBe("ws://127.0.0.1:19002");
     expect(plan.containerGatewayUrl).toBe("ws://127.0.0.1:19001");
     expect(plan.setupCodeCommand).toEqual([
+      "docker",
+      "exec",
+      "openclaw-even-g2-node-test-unit-run",
       "openclaw",
       "qr",
       "--url",
@@ -379,6 +384,23 @@ describe("isolated OpenClaw Gateway Docker plan", () => {
       "--settle-ms",
       "8000",
     ]);
+  });
+
+  it("writes an isolated state marker before approval helpers can mutate generated state", () => {
+    const root = makeTempRoot();
+    const plan = buildGatewayPlan(planArgs([
+      "--out-root",
+      path.join(root, "runs"),
+      "--no-default-env-file",
+      "--no-default-auth-binds",
+    ]));
+
+    preparePlanFiles(plan);
+
+    expect(JSON.parse(fs.readFileSync(path.join(plan.stateDir, ISOLATED_STATE_MARKER_FILE), "utf8"))).toMatchObject({
+      kind: "openclaw-even-g2-node.isolated-gateway-state",
+      runId: "unit-run",
+    });
   });
 
   it("rejects writable extra binds", () => {
