@@ -162,4 +162,29 @@ describe("e2e onboarding agent smoke helpers", () => {
     expect(detail).toContain("token=<redacted>");
     expect(detail).not.toContain("secret-token");
   });
+
+  it("accepts redacted secret-bearing Gateway URLs when checking preservation", () => {
+    const gatewayUrl = "wss://user:secret-pass@gateway.example.test/OpenClaw/ws?token=secret-token";
+    const response = "OpenClaw displayed the Even G2 setup QR for wss://user:<redacted>@gateway.example.test/OpenClaw/ws?token=<redacted>. Scan the setup code from the phone.";
+
+    expect(agentOnboardingVerdict({ ...okCommand, stdout: response }, response, {
+      gatewayUrl,
+      promptText: setupOpenClawAskRequest(gatewayUrl),
+    }).ok).toBe(true);
+  });
+
+  it("allows the requested 172.x Gateway URL while rejecting other bridge URLs", () => {
+    const gatewayUrl = "ws://172.20.3.4:19002/openclaw/ws";
+    const response = "OpenClaw displayed the Even G2 setup QR for ws://172.20.3.4:19002/openclaw/ws. Scan the setup code from the phone.";
+    const bridgeResponse = "OpenClaw displayed the Even G2 setup QR for ws://172.20.3.4:19002/openclaw/ws, not ws://172.17.0.2:19001. Scan the setup code from the phone.";
+
+    expect(agentOnboardingVerdict({ ...okCommand, stdout: response }, response, {
+      gatewayUrl,
+      promptText: setupOpenClawAskRequest(gatewayUrl),
+    }).ok).toBe(true);
+    expect(agentOnboardingVerdict({ ...okCommand, stdout: bridgeResponse }, bridgeResponse, {
+      gatewayUrl,
+      promptText: setupOpenClawAskRequest(gatewayUrl),
+    }).ok).toBe(false);
+  });
 });

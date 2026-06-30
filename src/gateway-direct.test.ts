@@ -498,6 +498,53 @@ describe("Gateway session events", () => {
     }));
   });
 
+  it("does not retry bootstrap when an auth pause is reported in details code", async () => {
+    vi.spyOn(Date, "now").mockReturnValue(1700000000000);
+    const storage = new MemoryStorage();
+    const authStore = new BrowserDeviceAuthStore(storage);
+    const errors: Error[] = [];
+    authStore.save(identity.deviceId, "node", "stored-device-token", [], "wss://gateway.example.test");
+    const session = new GatewayWsSession({
+      url: "wss://gateway.example.test",
+      bootstrapToken: "fresh-bootstrap",
+      role: "node",
+      scopes: [],
+      caps: ["device"],
+      commands: ["device.status"],
+      client: buildEvenG2ClientInfo("node", "inst-1"),
+      userAgent: "test",
+      WebSocketCtor: FakeGatewayWebSocketCtor,
+      identityStore: {
+        loadOrCreate: async () => identity,
+        sign: async (payload: string) => `sig:${payload}`,
+      },
+      authStore,
+      onError: (error) => errors.push(error),
+    });
+
+    await session.connect();
+    const ws = FakeGatewayWebSocket.instances[0]!;
+    ws.receive({ type: "event", event: "connect.challenge", payload: { nonce: "nonce-1" } });
+    await vi.waitFor(() => expect(lastConnectParams(ws).params?.auth).toEqual({ token: "stored-device-token" }));
+
+    ws.receive({
+      type: "res",
+      id: "__connect__",
+      ok: false,
+      error: {
+        code: "unauthorized",
+        message: "authentication paused",
+        details: { code: "auth_paused" },
+      },
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(ws.sent.filter((item) => item.includes("\"method\":\"connect\""))).toHaveLength(1);
+    expect(errors[0]).toBeInstanceOf(GatewayConnectError);
+    expect((errors[0] as GatewayConnectError).gatewayError?.details?.code).toBe("auth_paused");
+  });
+
   it("falls back to setup bootstrap once when a stored device token is rejected", async () => {
     vi.spyOn(Date, "now").mockReturnValue(1700000000000);
     const storage = new MemoryStorage();

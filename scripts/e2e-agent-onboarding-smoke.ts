@@ -231,8 +231,12 @@ function trimUrlCandidate(value: string) {
   return value.replace(/[),.;]+$/g, "");
 }
 
+function normalizeRedactedUrlPlaceholders(value: string) {
+  return value.replace(/<redacted>/gi, "redacted");
+}
+
 function urlCandidatesFromText(value: string) {
-  return (value.match(/\bwss?:\/\/[^\s"'<>`]+/gi) || []).map(trimUrlCandidate);
+  return (normalizeRedactedUrlPlaceholders(value).match(/\bwss?:\/\/[^\s"'<>`]+/gi) || []).map(trimUrlCandidate);
 }
 
 function sameGatewayUrl(candidate: URL, target: URL) {
@@ -245,21 +249,36 @@ function sameGatewayUrl(candidate: URL, target: URL) {
     candidate.search === target.search;
 }
 
+function gatewayUrlTargets(gatewayUrl: string) {
+  const urls: URL[] = [];
+  const seen = new Set<string>();
+  for (const value of [gatewayUrl, redactText(gatewayUrl)].map(normalizeRedactedUrlPlaceholders)) {
+    try {
+      const url = new URL(value);
+      url.hash = "";
+      if (!seen.has(url.href)) {
+        seen.add(url.href);
+        urls.push(url);
+      }
+    } catch {
+      // Non-URL gateway inputs are handled by the caller's string fallback.
+    }
+  }
+  return urls;
+}
+
 function includesGatewayTarget(responseText: string, gatewayUrl: string) {
   const trimmed = gatewayUrl.trim();
   if (!trimmed) return true;
-  let target: URL;
-  try {
-    target = new URL(trimmed);
-    target.hash = "";
-  } catch {
+  const targets = gatewayUrlTargets(trimmed);
+  if (targets.length === 0) {
     return responseText.includes(trimmed);
   }
   for (const candidateText of urlCandidatesFromText(responseText)) {
     try {
       const candidate = new URL(candidateText);
       candidate.hash = "";
-      if (sameGatewayUrl(candidate, target)) return true;
+      if (targets.some((target) => sameGatewayUrl(candidate, target))) return true;
     } catch {
       // Ignore non-URL text that matched the loose URL pattern.
     }
@@ -267,8 +286,25 @@ function includesGatewayTarget(responseText: string, gatewayUrl: string) {
   return false;
 }
 
-function containsContainerBridgeAddress(responseText: string) {
-  return /\b172\.(?:1[6-9]|2\d|3[0-1])\.\d{1,3}\.\d{1,3}\b/.test(responseText);
+function isContainerBridgeAddress(hostname: string) {
+  return /^172\.(?:1[6-9]|2\d|3[0-1])\.\d{1,3}\.\d{1,3}$/.test(hostname);
+}
+
+function containsUnexpectedContainerBridgeAddress(responseText: string, gatewayUrl: string) {
+  let uncheckedText = normalizeRedactedUrlPlaceholders(responseText);
+  const targets = gatewayUrlTargets(gatewayUrl.trim());
+  for (const candidateText of urlCandidatesFromText(responseText)) {
+    try {
+      const candidate = new URL(candidateText);
+      candidate.hash = "";
+      if (!isContainerBridgeAddress(candidate.hostname)) continue;
+      if (!targets.some((target) => sameGatewayUrl(candidate, target))) return true;
+      uncheckedText = uncheckedText.replace(candidateText, "");
+    } catch {
+      // Keep malformed URL-looking text in the bare address scan below.
+    }
+  }
+  return /\b172\.(?:1[6-9]|2\d|3[0-1])\.\d{1,3}\.\d{1,3}\b/.test(uncheckedText);
 }
 
 export function agentOnboardingVerdict(
@@ -318,7 +354,7 @@ export function agentOnboardingVerdict(
         },
         {
           name: "no-container-bridge-url",
-          ok: !containsContainerBridgeAddress(responseText),
+          ok: !containsUnexpectedContainerBridgeAddress(responseText, gatewayUrl),
           detail: "response should not expose Docker bridge URLs that the phone cannot reach",
         },
       ]

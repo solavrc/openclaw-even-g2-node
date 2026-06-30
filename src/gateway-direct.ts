@@ -664,7 +664,7 @@ export class GatewayWsSession {
     if (this.retriedStoredTokenFailureWithBootstrap || this.lastConnectAuthSource !== "device-token") return false;
     if (!this.lastConnectNonce) return false;
     if (!this.options.bootstrapToken?.trim()) return false;
-    if (error?.details?.pauseReconnect || error?.code === "auth_paused") return false;
+    if (error?.details?.pauseReconnect || error?.code === "auth_paused" || error?.details?.code === "auth_paused") return false;
     const normalized = [
       error?.code,
       error?.message,
