@@ -34,17 +34,6 @@ Configuration examples and setup references:
 Learn more:
 https://github.com/solavrc/openclaw-even-g2-node
 
-## What This README Is For
-
-This README is written for the end user and for the OpenClaw Agent or operator
-helping that user finish setup.
-
-| Surface | Name |
-| --- | --- |
-| Even Hub app listing | `OpenClaw Node` |
-| OpenClaw node/device surfaces | `Even G2` |
-| Repository and package namespace | `openclaw-even-g2-node` |
-
 ## First Thing To Say To OpenClaw
 
 When the app is not paired yet, the glasses tell you to ask OpenClaw for the
