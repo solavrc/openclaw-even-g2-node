@@ -758,7 +758,11 @@ function gatewayErrorIsAuthPause(error?: GatewayErrorShape) {
     error?.message,
     error?.details?.reason,
   ].filter(Boolean).join(" ").toLowerCase();
-  return normalized.includes("auth_paused") || normalized.includes("too many failed authentication attempts");
+  return (
+    normalized.includes("auth_paused") ||
+    normalized.includes("authentication paused") ||
+    normalized.includes("too many failed authentication attempts")
+  );
 }
 
 function gatewayErrorRequestsReconnectPause(error?: GatewayErrorShape) {
