@@ -14,9 +14,10 @@ on setup, connection status, HUD preview, voice mode selection, recovery, and
 diagnostics.
 
 For the recommended `Review` voice experience, start with xAI through OpenClaw
-Talk. SuperGrok or X Premium subscription access gives many users a fast,
-practical transcription path for short G2 voice turns, with the text shown on
-the glasses before anything is sent.
+Talk. When your Gateway exposes xAI transcription, SuperGrok or X Premium
+subscription access can give many users a fast, practical path for short G2
+voice turns, with the text shown on the glasses before the message is sent to
+the selected session.
 
 Voice input is still routed through OpenClaw. Speech provider, model,
 subscription, OAuth, API key, transcription prompt, and media-understanding
@@ -145,11 +146,11 @@ Set up OpenClaw Even G2 Send now voice. See solavrc/openclaw-even-g2-node.
 
 For the best `Review` experience today, start with xAI.
 [xAI's OpenClaw integration](https://x.com/xai/status/2056826183745253663)
-supports SuperGrok and X Premium subscription access, so many users can turn on
-glasses transcription without introducing a separate speech API account. In
-practice, xAI gives `Review` the product feel this app is built around: quick
-enough for short G2 voice turns, accurate enough to read before sending, and
-still routed through the user's private OpenClaw Gateway.
+supports SuperGrok and X Premium subscription access. When `talk.catalog` shows
+xAI as a configured transcription provider, it gives `Review` the product feel
+this app is built around: quick enough for short G2 voice turns, accurate enough
+to read before sending, and still routed through the user's private OpenClaw
+Gateway.
 
 `Review` transcription is separate from the Agent model you use for the
 session. Operators can keep a Codex/OpenAI harness for the main agent while

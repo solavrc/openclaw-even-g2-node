@@ -79,9 +79,10 @@ on setup, connection status, HUD preview, voice mode selection, recovery, and
 diagnostics.
 
 For the recommended `Review` voice experience, start with xAI through OpenClaw
-Talk. SuperGrok or X Premium subscription access gives many users a fast,
-practical transcription path for short G2 voice turns, with the text shown on
-the glasses before anything is sent.
+Talk. When your Gateway exposes xAI transcription, SuperGrok or X Premium
+subscription access can give many users a fast, practical path for short G2
+voice turns, with the text shown on the glasses before the message is sent to
+the selected session.
 
 Voice input is still routed through OpenClaw. Speech provider, model,
 subscription, OAuth, API key, transcription prompt, and media-understanding
