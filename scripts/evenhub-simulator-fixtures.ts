@@ -3,14 +3,15 @@ import type { ChildProcess, SpawnOptions } from "node:child_process";
 import fs from "node:fs";
 import { createServer } from "node:net";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 import { gitMetadata } from "./git-state.ts";
 import { fetchSimulator } from "./simulator-utils.ts";
 import { simulatorSourceSha256 } from "./simulator-source-fingerprint.ts";
 import { errorStack } from "./strict-helpers.ts";
 
-type FixtureFlow = "session" | "voiceReview" | "canvas" | "canvasTutorial" | "approval" | "recovery" | "storeChat" | "storeVoice" | "sendNow";
+export type FixtureFlow = "session" | "sessionSelector" | "voiceReview" | "canvas" | "canvasTutorial" | "approval" | "recovery" | "storeChat" | "storeVoice" | "sendNow";
 
-const FIXTURE_FLOWS: FixtureFlow[] = ["session", "voiceReview", "canvas", "canvasTutorial", "approval", "recovery", "storeChat", "storeVoice", "sendNow"];
+export const FIXTURE_FLOWS: FixtureFlow[] = ["session", "sessionSelector", "voiceReview", "canvas", "canvasTutorial", "approval", "recovery", "storeChat", "storeVoice", "sendNow"];
 const OUT_DIR = process.env.EVENG2_SIMULATOR_OUT_DIR || "/tmp";
 const REPORT_PATH = path.join(process.cwd(), ".openclaw-even-g2-node", "simulator-fixtures-report.json");
 
@@ -178,6 +179,16 @@ function parseLastJsonObject(output: string): unknown {
   throw new Error("Could not parse sim:e2e JSON output.");
 }
 
+export function simulatorFixtureAppUrl(flow: FixtureFlow, appPort: number) {
+  const fixtureMode = flow === "sessionSelector" ? "session" : flow;
+  const params = new URLSearchParams({
+    resetPairing: "1",
+    simFixture: fixtureMode,
+  });
+  if (flow === "sessionSelector") params.set("simSessionSelectorFlow", "1");
+  return `http://127.0.0.1:${appPort}/?${params.toString()}`;
+}
+
 async function runSetupBuildSmoke() {
   const appPort = await freePort();
   const simulatorPort = await freePort();
@@ -210,7 +221,7 @@ async function runFixtureSmoke(flow: FixtureFlow) {
   let simulator: ChildProcess | null = null;
   try {
     devServer = spawnProcess("pnpm", ["exec", "vite", "--host", "127.0.0.1", "--port", String(appPort), "--strictPort"]);
-    const appUrl = `http://127.0.0.1:${appPort}/?resetPairing=1&simFixture=${flow}`;
+    const appUrl = simulatorFixtureAppUrl(flow, appPort);
     await waitForHttp(`http://127.0.0.1:${appPort}/`);
 
     simulator = spawnProcess("pnpm", ["simulator", appUrl, "--automation-port", String(simulatorPort)]);
@@ -247,21 +258,24 @@ async function main() {
   console.log(JSON.stringify({ ...report, reportPath: REPORT_PATH }, null, 2));
 }
 
-main().catch((err) => {
-  const report = {
-    ok: false,
-    generatedAt: new Date().toISOString(),
-    outDir: OUT_DIR,
-    setup: false,
-    fixtures: FIXTURE_FLOWS,
-    git: { ...gitMetadata(), simulatorSourceSha256: simulatorSourceSha256() },
-    error: errorStack(err),
-  };
-  try {
-    writeReport(report);
-    console.error(JSON.stringify({ ...report, reportPath: REPORT_PATH }, null, 2));
-  } catch (writeError) {
-    console.error(errorStack(writeError));
-  }
-  process.exit(1);
-});
+const invokedPath = process.argv[1] ? pathToFileURL(path.resolve(process.argv[1])).href : "";
+if (import.meta.url === invokedPath) {
+  main().catch((err) => {
+    const report = {
+      ok: false,
+      generatedAt: new Date().toISOString(),
+      outDir: OUT_DIR,
+      setup: false,
+      fixtures: FIXTURE_FLOWS,
+      git: { ...gitMetadata(), simulatorSourceSha256: simulatorSourceSha256() },
+      error: errorStack(err),
+    };
+    try {
+      writeReport(report);
+      console.error(JSON.stringify({ ...report, reportPath: REPORT_PATH }, null, 2));
+    } catch (writeError) {
+      console.error(errorStack(writeError));
+    }
+    process.exit(1);
+  });
+}
