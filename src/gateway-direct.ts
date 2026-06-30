@@ -810,6 +810,8 @@ export type DirectTransportOptions = {
 };
 
 const FALLBACK_MAIN_SESSION_KEY = "agent:main:main";
+const TALK_RELAY_FINAL_QUIET_MS = 500;
+const TALK_RELAY_CLOSE_DRAIN_MS = 1800;
 
 export type DirectVoiceStartConfig = {
   format?: {
@@ -1712,6 +1714,11 @@ type GatewayDirectVoiceTransportOptions = {
   onClose(): void;
 };
 
+type TalkTranscriptSegment = {
+  key?: string;
+  text: string;
+};
+
 export class GatewayDirectVoiceTransport extends EventTarget {
   readonly CONNECTING = WebSocket.CONNECTING;
   readonly OPEN = WebSocket.OPEN;
@@ -1725,7 +1732,9 @@ export class GatewayDirectVoiceTransport extends EventTarget {
   private talkInputEncoding = "";
   private talkInputSampleRateHz = 0;
   private talkPartialText = "";
-  private talkFinalText = "";
+  private readonly talkFinalSegments: TalkTranscriptSegment[] = [];
+  private talkLastTranscriptEventAtMs = 0;
+  private talkCloseRequestedAtMs = 0;
   private talkSessionCloseRequested = false;
   private talkReady = false;
   private talkReadyResolve: (() => void) | null = null;
@@ -1818,11 +1827,13 @@ export class GatewayDirectVoiceTransport extends EventTarget {
     const isFinal = eventType.includes("done")
       || eventType.includes("final")
       || candidates.some((item) => item.final === true || item.isFinal === true);
+    this.talkLastTranscriptEventAtMs = Date.now();
     if (isFinal) {
-      this.talkFinalText = text;
+      this.talkPartialText = "";
+      this.addTalkFinalSegment(text, talkTranscriptSegmentKey(candidates));
       this.emit({
-        type: "transcript.final",
-        text,
+        type: "transcript.partial",
+        text: this.combinedTalkTranscript(),
         sessionKey: this.options.config.sessionKey || this.options.getSessionKey(),
         targetSessionKey: this.options.config.targetSessionKey,
         idempotencyKey: this.options.config.idempotencyKey,
@@ -1832,7 +1843,7 @@ export class GatewayDirectVoiceTransport extends EventTarget {
     this.talkPartialText = text;
     this.emit({
       type: "transcript.partial",
-      text,
+      text: this.combinedTalkTranscript({ includePartial: true }),
       sessionKey: this.options.config.sessionKey || this.options.getSessionKey(),
       targetSessionKey: this.options.config.targetSessionKey,
       idempotencyKey: this.options.config.idempotencyKey,
@@ -1983,6 +1994,7 @@ export class GatewayDirectVoiceTransport extends EventTarget {
       await this.audioAppendQueue.catch(() => undefined);
       if (this.closed) return;
       this.talkSessionCloseRequested = true;
+      this.talkCloseRequestedAtMs = Date.now();
       await this.options.request("talk.session.close", {
         sessionId: this.talkSessionId,
       }, 15000);
@@ -2034,12 +2046,52 @@ export class GatewayDirectVoiceTransport extends EventTarget {
 
   private async waitForTalkFinalText() {
     const deadline = Date.now() + Math.max(2500, this.options.config.draftTimeoutMs || 8000);
+    const closeDrainUntil = Date.now() + TALK_RELAY_CLOSE_DRAIN_MS;
     while (Date.now() < deadline && !this.closed) {
-      const finalText = this.talkFinalText.trim();
-      if (finalText) return finalText;
+      const text = this.combinedTalkTranscript({ includePartial: true }).trim();
+      const hasFinalText = this.talkFinalSegments.some((segment) => segment.text.trim());
+      const hasPartialText = Boolean(this.talkPartialText.trim());
+      const quietForMs = Date.now() - this.talkLastTranscriptEventAtMs;
+      if (
+        text
+        && hasFinalText
+        && !hasPartialText
+        && Date.now() >= closeDrainUntil
+        && (!this.talkLastTranscriptEventAtMs || quietForMs >= TALK_RELAY_FINAL_QUIET_MS)
+      ) {
+        return text;
+      }
       await new Promise((resolve) => setTimeout(resolve, 100));
     }
-    return this.talkPartialText.trim();
+    return this.combinedTalkTranscript({ includePartial: true }).trim();
+  }
+
+  private addTalkFinalSegment(text: string, key = "") {
+    const normalized = text.trim();
+    if (!normalized) return;
+    if (key) {
+      const existing = this.talkFinalSegments.find((segment) => segment.key === key);
+      if (existing) {
+        existing.text = normalized;
+        return;
+      }
+      this.talkFinalSegments.push({ key, text: normalized });
+      return;
+    }
+    this.talkFinalSegments.push({ text: normalized });
+  }
+
+  private combinedTalkTranscript(options: { includePartial?: boolean } = {}) {
+    const finalized = this.talkFinalSegments
+      .map((segment) => segment.text.trim())
+      .filter(Boolean)
+      .join(" ")
+      .trim();
+    if (!options.includePartial) return finalized;
+    const partial = this.talkPartialText.trim();
+    if (!partial) return finalized;
+    if (!finalized) return partial;
+    return `${finalized} ${partial}`;
   }
 
   private waitForTalkReady() {
@@ -2156,6 +2208,36 @@ function talkTranscriptText(candidates: Record<string, unknown>[]) {
       const nested = asString(delta.text) || asString(delta.value) || asString(delta.content);
       if (nested) return nested;
     }
+  }
+  return "";
+}
+
+function talkTranscriptSegmentKey(candidates: Record<string, unknown>[]) {
+  for (const candidate of candidates) {
+    const direct = asString(candidate.turnId)
+      || asString(candidate.turn_id)
+      || asString(candidate.segmentId)
+      || asString(candidate.segment_id)
+      || asString(candidate.itemId)
+      || asString(candidate.item_id);
+    if (direct) return direct;
+    const turn = asObject(candidate.turn);
+    const turnId = turn ? asString(turn.id) || asString(turn.turnId) || asString(turn.turn_id) : "";
+    if (turnId) return turnId;
+    const segment = asObject(candidate.segment);
+    const segmentId = segment ? asString(segment.id) || asString(segment.segmentId) || asString(segment.segment_id) : "";
+    if (segmentId) return segmentId;
+    const transcript = asObject(candidate.transcript);
+    const transcriptId = transcript
+      ? asString(transcript.id)
+        || asString(transcript.transcriptId)
+        || asString(transcript.transcript_id)
+        || asString(transcript.segmentId)
+        || asString(transcript.segment_id)
+        || asString(transcript.itemId)
+        || asString(transcript.item_id)
+      : "";
+    if (transcriptId) return transcriptId;
   }
   return "";
 }
