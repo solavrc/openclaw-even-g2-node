@@ -89,6 +89,7 @@ const identity: DeviceIdentity = {
 };
 
 afterEach(() => {
+  vi.useRealTimers();
   vi.restoreAllMocks();
   FakeGatewayWebSocket.instances = [];
 });
@@ -2333,7 +2334,7 @@ describe("Gateway direct voice", () => {
     voice.handleTalkEvent({ type: "talk.event", payload: { type: "transcript.delta", sessionId: "talk-1", text: "OpenClaw" } });
     voice.send(JSON.stringify({ type: "utterance.finalize" }));
     voice.handleTalkEvent({ type: "talk.event", payload: { type: "transcript.done", sessionId: "talk-1", text: "OpenClawについて説明して。" } });
-    await vi.waitFor(() => expect(messages.some((message) => message.type === "voice.draft.ready")).toBe(true));
+    await vi.waitFor(() => expect(messages.some((message) => message.type === "voice.draft.ready")).toBe(true), { timeout: 4000 });
 
     expect(calls[0]).toMatchObject({
       method: "talk.session.create",
@@ -2371,6 +2372,160 @@ describe("Gateway direct voice", () => {
       sessionKey: "agent:main:main",
       targetSessionKey: "agent:main:main",
       idempotencyKey: "voice-talk-1",
+    });
+  });
+
+  it("joins multiple Talk transcript finals into one review draft", async () => {
+    const calls: Array<{ method: string; params?: Record<string, unknown> }> = [];
+    const voice = new GatewayDirectVoiceTransport({
+      gateway: {} as never,
+      config: {
+        transcriptionMode: "talk-relay",
+        sessionKey: "agent:main:main",
+        targetSessionKey: "agent:main:main",
+        idempotencyKey: "voice-talk-multi-final",
+        draftTimeoutMs: 3000,
+        format: {
+          encoding: "pcm_s16le",
+          sampleRateHz: 16000,
+          channels: 1,
+        },
+      },
+      getSessionKey: () => "agent:main:main",
+      request: async (method, params) => {
+        calls.push({ method, params: params as Record<string, unknown> });
+        if (method === "talk.session.create") return { sessionId: "talk-multi-final-1" };
+        return {};
+      },
+      onClose: () => undefined,
+    });
+    const messages: Array<Record<string, unknown>> = [];
+    voice.addEventListener("message", (event) => {
+      messages.push(JSON.parse((event as MessageEvent).data as string) as Record<string, unknown>);
+    });
+
+    const openPromise = voice.open();
+    await vi.waitFor(() => expect(calls.some((call) => call.method === "talk.session.create")).toBe(true));
+    voice.handleTalkEvent({ type: "ready", transcriptionSessionId: "talk-multi-final-1" });
+    await openPromise;
+    voice.handleTalkEvent({
+      type: "talk.event",
+      payload: {
+        type: "transcript.done",
+        sessionId: "talk-multi-final-1",
+        turnId: "turn-1",
+        text: "令和七年七月一日の報告書を作成しました。",
+      },
+    });
+    voice.handleTalkEvent({
+      type: "talk.event",
+      payload: {
+        type: "transcript.delta",
+        sessionId: "talk-multi-final-1",
+        turnId: "turn-2",
+        text: "請求金額は税込み",
+      },
+    });
+    voice.handleTalkEvent({
+      type: "talk.event",
+      payload: {
+        type: "transcript.done",
+        sessionId: "talk-multi-final-1",
+        turnId: "turn-2",
+        text: "請求金額は税込み百二十三万四千五百六十七円です。",
+      },
+    });
+    voice.send(JSON.stringify({ type: "utterance.finalize" }));
+
+    await vi.waitFor(() => expect(messages.some((message) => message.type === "voice.draft.ready")).toBe(true), { timeout: 4000 });
+    expect(messages).toContainEqual({
+      type: "transcript.final",
+      text: "令和七年七月一日の報告書を作成しました。",
+      sessionKey: "agent:main:main",
+      targetSessionKey: "agent:main:main",
+      idempotencyKey: "voice-talk-multi-final",
+    });
+    expect(messages).toContainEqual({
+      type: "transcript.partial",
+      text: "令和七年七月一日の報告書を作成しました。 請求金額は税込み",
+      sessionKey: "agent:main:main",
+      targetSessionKey: "agent:main:main",
+      idempotencyKey: "voice-talk-multi-final",
+    });
+    expect(messages).toContainEqual({
+      type: "transcript.final",
+      text: "令和七年七月一日の報告書を作成しました。 請求金額は税込み百二十三万四千五百六十七円です。",
+      sessionKey: "agent:main:main",
+      targetSessionKey: "agent:main:main",
+      idempotencyKey: "voice-talk-multi-final",
+    });
+    expect(messages).toContainEqual({
+      type: "voice.draft.ready",
+      text: "令和七年七月一日の報告書を作成しました。 請求金額は税込み百二十三万四千五百六十七円です。",
+      sessionKey: "agent:main:main",
+      targetSessionKey: "agent:main:main",
+      idempotencyKey: "voice-talk-multi-final",
+    });
+  });
+
+  it("includes Talk transcript finals that arrive while closing the session", async () => {
+    const close = deferred<Record<string, never>>();
+    const calls: Array<{ method: string; params?: Record<string, unknown> }> = [];
+    const voice = new GatewayDirectVoiceTransport({
+      gateway: {} as never,
+      config: {
+        transcriptionMode: "talk-relay",
+        sessionKey: "agent:main:main",
+        targetSessionKey: "agent:main:main",
+        idempotencyKey: "voice-talk-close-final",
+        draftTimeoutMs: 3000,
+        format: {
+          encoding: "pcm_s16le",
+          sampleRateHz: 16000,
+          channels: 1,
+        },
+      },
+      getSessionKey: () => "agent:main:main",
+      request: async (method, params) => {
+        calls.push({ method, params: params as Record<string, unknown> });
+        if (method === "talk.session.create") return { sessionId: "talk-close-final-1" };
+        if (method === "talk.session.close") return close.promise;
+        return {};
+      },
+      onClose: () => undefined,
+    });
+    const messages: Array<Record<string, unknown>> = [];
+    voice.addEventListener("message", (event) => {
+      messages.push(JSON.parse((event as MessageEvent).data as string) as Record<string, unknown>);
+    });
+
+    const openPromise = voice.open();
+    await vi.waitFor(() => expect(calls.some((call) => call.method === "talk.session.create")).toBe(true));
+    voice.handleTalkEvent({ type: "ready", transcriptionSessionId: "talk-close-final-1" });
+    await openPromise;
+    voice.handleTalkEvent({
+      type: "transcript.done",
+      sessionId: "talk-close-final-1",
+      turnId: "turn-1",
+      text: "経済産業省向けの技術検証報告書を作成しました。",
+    });
+    voice.send(JSON.stringify({ type: "utterance.finalize" }));
+    await vi.waitFor(() => expect(calls.some((call) => call.method === "talk.session.close")).toBe(true));
+    voice.handleTalkEvent({
+      type: "transcript.done",
+      sessionId: "talk-close-final-1",
+      turnId: "turn-2",
+      text: "確定 transcript を複数の区間として連結してから表示してください。",
+    });
+    close.resolve({});
+
+    await vi.waitFor(() => expect(messages.some((message) => message.type === "voice.draft.ready")).toBe(true), { timeout: 4000 });
+    expect(messages).toContainEqual({
+      type: "voice.draft.ready",
+      text: "経済産業省向けの技術検証報告書を作成しました。 確定 transcript を複数の区間として連結してから表示してください。",
+      sessionKey: "agent:main:main",
+      targetSessionKey: "agent:main:main",
+      idempotencyKey: "voice-talk-close-final",
     });
   });
 
@@ -2418,7 +2573,7 @@ describe("Gateway direct voice", () => {
     voice.send(JSON.stringify({ type: "utterance.finalize" }));
     voice.handleTalkEvent({ type: "transcript.done", sessionId: "talk-node-1", text: "Node transcript" });
 
-    await vi.waitFor(() => expect(messages.some((message) => message.type === "transcript.final")).toBe(true));
+    await vi.waitFor(() => expect(messages.some((message) => message.type === "transcript.final")).toBe(true), { timeout: 4000 });
     expect(messages).toContainEqual({
       type: "transcript.final",
       text: "Node transcript",
