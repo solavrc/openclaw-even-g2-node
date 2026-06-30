@@ -218,13 +218,17 @@ function normalizeText(value: string) {
   return value.toLowerCase().replace(/\s+/g, " ").trim();
 }
 
+function promptEchoCandidates(promptText: string) {
+  return [...new Set([promptText, redactText(promptText)].map(normalizeText).filter(Boolean))];
+}
+
 function looksLikePromptEcho(responseText: string, promptText = setupOpenClawAskRequest()) {
   const normalized = normalizeText(responseText);
-  const prompt = normalizeText(promptText);
-  if (!normalized || !prompt) return false;
-  if (normalized === prompt) return true;
+  const prompts = promptEchoCandidates(promptText);
+  if (!normalized || prompts.length === 0) return false;
+  if (prompts.includes(normalized)) return true;
   const withoutCommonPrefix = normalized.replace(/^(?:prompt|input|user|message|request|submitted prompt)\s*[:>-]\s*/, "");
-  return withoutCommonPrefix === prompt;
+  return prompts.includes(withoutCommonPrefix);
 }
 
 function trimUrlCandidate(value: string) {

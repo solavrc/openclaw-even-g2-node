@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { setupOpenClawAskRequest } from "../src/openclaw-ask-requests.ts";
+import { redactText } from "./e2e-agent-review.ts";
 import {
   agentOnboardingVerdict,
   extractAgentResponseText,
@@ -92,6 +93,23 @@ describe("e2e onboarding agent smoke helpers", () => {
     expect(agentOnboardingVerdict({ ...okCommand, stdout: promptOnly }, extractAgentResponseText(promptOnly)).ok).toBe(false);
     expect(extractAgentResponseText(rawPromptEcho)).toBe(rawPromptEcho);
     expect(agentOnboardingVerdict({ ...okCommand, stdout: rawPromptEcho }, extractAgentResponseText(rawPromptEcho)).ok).toBe(false);
+  });
+
+  it("rejects redacted prompt echoes for secret-bearing Gateway URLs", () => {
+    const gatewayUrl = "wss://gateway.example.test/openclaw/ws?token=secret-token";
+    const promptText = setupOpenClawAskRequest(gatewayUrl);
+    const response = `prompt: ${redactText(promptText)}`;
+
+    const verdict = agentOnboardingVerdict({ ...okCommand, stdout: response }, response, {
+      gatewayUrl,
+      promptText,
+    });
+
+    expect(verdict.ok).toBe(false);
+    expect(verdict.checks.find((check) => check.name === "agent-response-text")).toMatchObject({
+      ok: false,
+      detail: "Agent response only echoed the setup prompt",
+    });
   });
 
   it("requires isolated Agent responses to preserve the host Gateway URL", () => {
