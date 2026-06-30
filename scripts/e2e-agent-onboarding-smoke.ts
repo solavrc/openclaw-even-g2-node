@@ -242,7 +242,7 @@ function normalizeRedactedUrlPlaceholders(value: string) {
 }
 
 function urlCandidatesFromText(value: string) {
-  return (normalizeRedactedUrlPlaceholders(value).match(/\bwss?:\/\/[^\s"'<>`]+/gi) || []).map(trimUrlCandidate);
+  return (normalizeRedactedUrlPlaceholders(value).match(/\bwss?:\/\/[^\s"'<>`[\]()]+/gi) || []).map(trimUrlCandidate);
 }
 
 function sameGatewayUrl(candidate: URL, target: URL) {

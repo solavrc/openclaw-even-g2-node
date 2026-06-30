@@ -128,6 +128,21 @@ describe("e2e onboarding agent smoke helpers", () => {
     }).ok).toBe(false);
   });
 
+  it("accepts Markdown-wrapped host Gateway URLs", () => {
+    const gatewayUrl = "ws://127.0.0.1:19002";
+    const bracketed = "OpenClaw displayed the Even G2 setup QR for [ws://127.0.0.1:19002]. Scan the setup code from the phone.";
+    const linked = "OpenClaw displayed the Even G2 setup QR for [ws://127.0.0.1:19002](ws://127.0.0.1:19002). Scan the setup code from the phone.";
+
+    expect(agentOnboardingVerdict({ ...okCommand, stdout: bracketed }, bracketed, {
+      gatewayUrl,
+      promptText: setupOpenClawAskRequest(gatewayUrl),
+    }).ok).toBe(true);
+    expect(agentOnboardingVerdict({ ...okCommand, stdout: linked }, linked, {
+      gatewayUrl,
+      promptText: setupOpenClawAskRequest(gatewayUrl),
+    }).ok).toBe(true);
+  });
+
   it("rejects onboarding responses that drop a required Gateway path or query", () => {
     const gatewayUrl = "wss://gateway.example.test/openclaw/ws?tenant=alpha";
     const fullResponse = "OpenClaw displayed the Even G2 setup QR for wss://gateway.example.test/openclaw/ws?tenant=alpha. Scan the setup code from the phone.";
