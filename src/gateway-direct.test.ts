@@ -2468,6 +2468,127 @@ describe("Gateway direct voice", () => {
     });
   });
 
+  it("does not use Talk response ids as segment replacement keys", () => {
+    const voice = new GatewayDirectVoiceTransport({
+      gateway: {} as never,
+      config: {
+        transcriptionMode: "talk-relay",
+        sessionKey: "agent:main:main",
+        targetSessionKey: "agent:main:main",
+        idempotencyKey: "voice-talk-response-id",
+        format: {
+          encoding: "pcm_s16le",
+          sampleRateHz: 16000,
+          channels: 1,
+        },
+      },
+      getSessionKey: () => "agent:main:main",
+      request: async () => ({}),
+      onClose: () => undefined,
+    });
+    const messages: Array<Record<string, unknown>> = [];
+    voice.addEventListener("message", (event) => {
+      messages.push(JSON.parse((event as MessageEvent).data as string) as Record<string, unknown>);
+    });
+
+    voice.handleTalkEvent({
+      type: "transcript.done",
+      sessionId: "talk-response-id-1",
+      responseId: "response-1",
+      text: "東京都渋谷区の報告書です。",
+    });
+    voice.handleTalkEvent({
+      type: "transcript.done",
+      sessionId: "talk-response-id-1",
+      responseId: "response-1",
+      text: "請求金額は百二十三万円です。",
+    });
+
+    expect(messages.at(-1)).toMatchObject({
+      type: "transcript.final",
+      text: "東京都渋谷区の報告書です。 請求金額は百二十三万円です。",
+    });
+  });
+
+  it("preserves repeated unkeyed Talk transcript finals", () => {
+    const voice = new GatewayDirectVoiceTransport({
+      gateway: {} as never,
+      config: {
+        transcriptionMode: "talk-relay",
+        sessionKey: "agent:main:main",
+        targetSessionKey: "agent:main:main",
+        idempotencyKey: "voice-talk-repeated-unkeyed",
+        format: {
+          encoding: "pcm_s16le",
+          sampleRateHz: 16000,
+          channels: 1,
+        },
+      },
+      getSessionKey: () => "agent:main:main",
+      request: async () => ({}),
+      onClose: () => undefined,
+    });
+    const messages: Array<Record<string, unknown>> = [];
+    voice.addEventListener("message", (event) => {
+      messages.push(JSON.parse((event as MessageEvent).data as string) as Record<string, unknown>);
+    });
+
+    voice.handleTalkEvent({ type: "transcript.done", sessionId: "talk-repeat-1", text: "はい" });
+    voice.handleTalkEvent({ type: "transcript.done", sessionId: "talk-repeat-1", text: "はい" });
+
+    expect(messages.at(-1)).toMatchObject({
+      type: "transcript.final",
+      text: "はい はい",
+    });
+  });
+
+  it("drains Talk transcript events after a slow close response", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(2000);
+    const voice = new GatewayDirectVoiceTransport({
+      gateway: {} as never,
+      config: {
+        transcriptionMode: "talk-relay",
+        sessionKey: "agent:main:main",
+        targetSessionKey: "agent:main:main",
+        idempotencyKey: "voice-talk-slow-close",
+        draftTimeoutMs: 3000,
+        format: {
+          encoding: "pcm_s16le",
+          sampleRateHz: 16000,
+          channels: 1,
+        },
+      },
+      getSessionKey: () => "agent:main:main",
+      request: async () => ({}),
+      onClose: () => undefined,
+    });
+    const addTalkFinalSegment = Reflect.get(voice, "addTalkFinalSegment");
+    const waitForTalkFinalText = Reflect.get(voice, "waitForTalkFinalText");
+    if (typeof addTalkFinalSegment !== "function" || typeof waitForTalkFinalText !== "function") {
+      throw new Error("GatewayDirectVoiceTransport Talk helpers are unavailable");
+    }
+    addTalkFinalSegment.call(voice, "経済産業省向けの技術検証報告書を作成しました。", "turn-1");
+    Reflect.set(voice, "talkLastTranscriptEventAtMs", 0);
+    Reflect.set(voice, "talkCloseRequestedAtMs", 0);
+
+    let settledText = "";
+    const waitPromise = (waitForTalkFinalText.call(voice) as Promise<string>).then((text) => {
+      settledText = text;
+      return text;
+    });
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(settledText).toBe("");
+
+    addTalkFinalSegment.call(voice, "確定 transcript を複数の区間として連結します。", "turn-2");
+    Reflect.set(voice, "talkLastTranscriptEventAtMs", Date.now());
+    await vi.advanceTimersByTimeAsync(900);
+
+    await expect(waitPromise).resolves.toBe(
+      "経済産業省向けの技術検証報告書を作成しました。 確定 transcript を複数の区間として連結します。",
+    );
+  });
+
   it("includes Talk transcript finals that arrive while closing the session", async () => {
     const close = deferred<Record<string, never>>();
     const calls: Array<{ method: string; params?: Record<string, unknown> }> = [];

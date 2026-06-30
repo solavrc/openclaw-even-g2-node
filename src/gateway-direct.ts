@@ -2046,7 +2046,7 @@ export class GatewayDirectVoiceTransport extends EventTarget {
 
   private async waitForTalkFinalText() {
     const deadline = Date.now() + Math.max(2500, this.options.config.draftTimeoutMs || 8000);
-    const closeDrainUntil = this.talkCloseRequestedAtMs + TALK_RELAY_CLOSE_DRAIN_MS;
+    const closeDrainUntil = Date.now() + TALK_RELAY_CLOSE_DRAIN_MS;
     while (Date.now() < deadline && !this.closed) {
       const text = this.combinedTalkTranscript({ includePartial: true }).trim();
       const quietForMs = Date.now() - this.talkLastTranscriptEventAtMs;
@@ -2079,8 +2079,7 @@ export class GatewayDirectVoiceTransport extends EventTarget {
       this.talkFinalSegments.push({ text: normalized });
       return;
     }
-    if (normalized === finalized || finalized.endsWith(normalized)) return;
-    if (normalized.startsWith(finalized)) {
+    if (normalized.length > finalized.length && normalized.startsWith(finalized)) {
       this.talkFinalSegments.splice(0, this.talkFinalSegments.length, { text: normalized });
       return;
     }
@@ -2227,9 +2226,7 @@ function talkTranscriptSegmentKey(candidates: Record<string, unknown>[]) {
       || asString(candidate.segmentId)
       || asString(candidate.segment_id)
       || asString(candidate.itemId)
-      || asString(candidate.item_id)
-      || asString(candidate.responseId)
-      || asString(candidate.response_id);
+      || asString(candidate.item_id);
     if (direct) return direct;
     const turn = asObject(candidate.turn);
     const turnId = turn ? asString(turn.id) || asString(turn.turnId) || asString(turn.turn_id) : "";
