@@ -121,6 +121,11 @@ function lastConnectParams(ws: FakeGatewayWebSocket) {
   return JSON.parse(raw) as { params?: { auth?: unknown; client?: { id?: string }; device?: { signature?: string } } };
 }
 
+function setOpenOperatorSession(gateway: GatewayDirectTransport, session: unknown) {
+  Reflect.set(gateway, "operatorSession", session);
+  Reflect.set(gateway, "operatorSessionOpen", true);
+}
+
 describe("Gateway direct setup", () => {
   it("builds JSON-RPC request frames with params only when present", () => {
     expect(gatewayRpcRequestEnvelope("req-1", "node.list", { active: true })).toEqual({
@@ -1043,7 +1048,7 @@ describe("Gateway direct transcript history", () => {
     gateway.addEventListener("message", (event) => {
       messages.push(JSON.parse((event as MessageEvent).data as string) as Record<string, unknown>);
     });
-    Reflect.set(gateway, "operatorSession", { request });
+    setOpenOperatorSession(gateway, { request });
     Reflect.set(gateway, "nodeApprovalPending", true);
 
     const refreshNodeApprovalStatus = Reflect.get(gateway, "refreshNodeApprovalStatus");
@@ -1092,7 +1097,7 @@ describe("Gateway direct transcript history", () => {
     gateway.addEventListener("message", (event) => {
       messages.push(JSON.parse((event as MessageEvent).data as string) as Record<string, unknown>);
     });
-    Reflect.set(gateway, "operatorSession", { request });
+    setOpenOperatorSession(gateway, { request });
     Reflect.set(gateway, "nodeApprovalPending", true);
 
     const refreshNodeApprovalStatus = Reflect.get(gateway, "refreshNodeApprovalStatus");
@@ -1145,7 +1150,7 @@ describe("Gateway direct transcript history", () => {
     gateway.addEventListener("message", (event) => {
       messages.push(JSON.parse((event as MessageEvent).data as string) as Record<string, unknown>);
     });
-    Reflect.set(gateway, "operatorSession", { request });
+    setOpenOperatorSession(gateway, { request });
     Reflect.set(gateway, "connectedDeviceId", "device-current");
     Reflect.set(gateway, "nodeApprovalPending", true);
 
@@ -1194,7 +1199,7 @@ describe("Gateway direct transcript history", () => {
     gateway.addEventListener("message", (event) => {
       messages.push(JSON.parse((event as MessageEvent).data as string) as Record<string, unknown>);
     });
-    Reflect.set(gateway, "operatorSession", { request });
+    setOpenOperatorSession(gateway, { request });
     Reflect.set(gateway, "connectedDeviceId", "device-current");
 
     const refreshNodeApprovalStatus = Reflect.get(gateway, "refreshNodeApprovalStatus");
@@ -1248,7 +1253,7 @@ describe("Gateway direct transcript history", () => {
     gateway.addEventListener("message", (event) => {
       messages.push(JSON.parse((event as MessageEvent).data as string) as Record<string, unknown>);
     });
-    Reflect.set(gateway, "operatorSession", { request });
+    setOpenOperatorSession(gateway, { request });
     Reflect.set(gateway, "connectedDeviceId", "device-current");
 
     const refreshNodeApprovalStatus = Reflect.get(gateway, "refreshNodeApprovalStatus");
@@ -1306,7 +1311,7 @@ describe("Gateway direct transcript history", () => {
     gateway.addEventListener("message", (event) => {
       messages.push(JSON.parse((event as MessageEvent).data as string) as Record<string, unknown>);
     });
-    Reflect.set(gateway, "operatorSession", { request });
+    setOpenOperatorSession(gateway, { request });
     Reflect.set(gateway, "connectedDeviceId", "device-current");
 
     const refreshNodeApprovalStatus = Reflect.get(gateway, "refreshNodeApprovalStatus");
@@ -1365,7 +1370,7 @@ describe("Gateway direct transcript history", () => {
     gateway.addEventListener("message", (event) => {
       messages.push(JSON.parse((event as MessageEvent).data as string) as Record<string, unknown>);
     });
-    Reflect.set(gateway, "operatorSession", { request });
+    setOpenOperatorSession(gateway, { request });
     Reflect.set(gateway, "connectedDeviceId", "device-current");
 
     const refreshNodeApprovalStatus = Reflect.get(gateway, "refreshNodeApprovalStatus");
@@ -1409,7 +1414,7 @@ describe("Gateway direct transcript history", () => {
     gateway.addEventListener("message", (event) => {
       messages.push(JSON.parse((event as MessageEvent).data as string) as Record<string, unknown>);
     });
-    Reflect.set(gateway, "operatorSession", { request });
+    setOpenOperatorSession(gateway, { request });
     Reflect.set(gateway, "connectedDeviceId", "device-current");
 
     const refreshNodeApprovalStatus = Reflect.get(gateway, "refreshNodeApprovalStatus");
@@ -1454,7 +1459,7 @@ describe("Gateway direct transcript history", () => {
     gateway.addEventListener("message", (event) => {
       messages.push(JSON.parse((event as MessageEvent).data as string) as Record<string, unknown>);
     });
-    Reflect.set(gateway, "operatorSession", { request });
+    setOpenOperatorSession(gateway, { request });
     Reflect.set(gateway, "connectedDeviceId", "device-current");
 
     const refreshNodeApprovalStatus = Reflect.get(gateway, "refreshNodeApprovalStatus");
@@ -1498,7 +1503,7 @@ describe("Gateway direct transcript history", () => {
     gateway.addEventListener("message", (event) => {
       messages.push(JSON.parse((event as MessageEvent).data as string) as Record<string, unknown>);
     });
-    Reflect.set(gateway, "operatorSession", { request });
+    setOpenOperatorSession(gateway, { request });
     Reflect.set(gateway, "connectedDeviceId", "device-current");
     Reflect.set(gateway, "nodeApprovalPending", true);
 
@@ -1553,7 +1558,7 @@ describe("Gateway direct transcript history", () => {
     gateway.addEventListener("message", (event) => {
       messages.push(JSON.parse((event as MessageEvent).data as string) as Record<string, unknown>);
     });
-    Reflect.set(gateway, "operatorSession", { request });
+    setOpenOperatorSession(gateway, { request });
     Reflect.set(gateway, "connectedDeviceId", "device-current");
 
     const refreshNodeApprovalStatus = Reflect.get(gateway, "refreshNodeApprovalStatus");
@@ -1619,7 +1624,7 @@ describe("Gateway direct transcript history", () => {
     gateway.addEventListener("message", (event) => {
       messages.push(JSON.parse((event as MessageEvent).data as string) as Record<string, unknown>);
     });
-    Reflect.set(gateway, "operatorSession", { request });
+    setOpenOperatorSession(gateway, { request });
     Reflect.set(gateway, "connectedDeviceId", "device-current");
 
     const refreshNodeApprovalStatus = Reflect.get(gateway, "refreshNodeApprovalStatus");
@@ -1681,7 +1686,7 @@ describe("Gateway direct transcript history", () => {
     gateway.addEventListener("message", (event) => {
       messages.push(JSON.parse((event as MessageEvent).data as string) as Record<string, unknown>);
     });
-    Reflect.set(gateway, "operatorSession", { request });
+    setOpenOperatorSession(gateway, { request });
     Reflect.set(gateway, "connectedDeviceId", "device-current");
     Reflect.set(gateway, "nodeApprovalPending", true);
 
@@ -1730,7 +1735,7 @@ describe("Gateway direct transcript history", () => {
     gateway.addEventListener("message", (event) => {
       messages.push(JSON.parse((event as MessageEvent).data as string) as Record<string, unknown>);
     });
-    Reflect.set(gateway, "operatorSession", { request });
+    setOpenOperatorSession(gateway, { request });
     Reflect.set(gateway, "connectedDeviceId", "device-current");
     Reflect.set(gateway, "nodeApprovalPending", true);
 
@@ -1769,7 +1774,7 @@ describe("Gateway direct transcript history", () => {
     gateway.addEventListener("message", (event) => {
       messages.push(JSON.parse((event as MessageEvent).data as string) as Record<string, unknown>);
     });
-    Reflect.set(gateway, "operatorSession", { request });
+    setOpenOperatorSession(gateway, { request });
     Reflect.set(gateway, "nodeApprovalPending", true);
 
     const refreshNodeApprovalStatus = Reflect.get(gateway, "refreshNodeApprovalStatus");
@@ -1815,7 +1820,7 @@ describe("Gateway direct transcript history", () => {
     gateway.addEventListener("message", (event) => {
       messages.push(JSON.parse((event as MessageEvent).data as string) as Record<string, unknown>);
     });
-    Reflect.set(gateway, "operatorSession", { request });
+    setOpenOperatorSession(gateway, { request });
     Reflect.set(gateway, "nodeApprovalPending", true);
 
     const refreshNodeApprovalStatus = Reflect.get(gateway, "refreshNodeApprovalStatus");
@@ -1862,7 +1867,7 @@ describe("Gateway direct transcript history", () => {
     gateway.addEventListener("message", (event) => {
       messages.push(JSON.parse((event as MessageEvent).data as string) as Record<string, unknown>);
     });
-    Reflect.set(gateway, "operatorSession", { request });
+    setOpenOperatorSession(gateway, { request });
     Reflect.set(gateway, "nodeApprovalPending", true);
 
     const handleAppCommand = Reflect.get(gateway, "handleAppCommand");
@@ -1886,7 +1891,7 @@ describe("Gateway direct transcript history", () => {
     gateway.addEventListener("message", (event) => {
       messages.push(JSON.parse((event as MessageEvent).data as string) as Record<string, unknown>);
     });
-    Reflect.set(gateway, "operatorSession", { request });
+    setOpenOperatorSession(gateway, { request });
     Reflect.set(gateway, "selectedSessionKey", "agent:main:main");
 
     const handleAppCommand = Reflect.get(gateway, "handleAppCommand");
@@ -1922,7 +1927,7 @@ describe("Gateway direct transcript history", () => {
     gateway.addEventListener("message", (event) => {
       messages.push(JSON.parse((event as MessageEvent).data as string) as Record<string, unknown>);
     });
-    Reflect.set(gateway, "operatorSession", { request });
+    setOpenOperatorSession(gateway, { request });
 
     const handleAppCommand = Reflect.get(gateway, "handleAppCommand");
     if (typeof handleAppCommand !== "function") throw new Error("GatewayDirectTransport.handleAppCommand is unavailable");
@@ -1957,7 +1962,7 @@ describe("Gateway direct transcript history", () => {
     gateway.addEventListener("message", (event) => {
       messages.push(JSON.parse((event as MessageEvent).data as string) as Record<string, unknown>);
     });
-    Reflect.set(gateway, "operatorSession", { request });
+    setOpenOperatorSession(gateway, { request });
 
     const handleAppCommand = Reflect.get(gateway, "handleAppCommand");
     if (typeof handleAppCommand !== "function") throw new Error("GatewayDirectTransport.handleAppCommand is unavailable");
@@ -2069,7 +2074,8 @@ describe("Gateway direct voice", () => {
       messages.push(JSON.parse((event as MessageEvent).data as string) as Record<string, unknown>);
     });
     Reflect.set(gateway, "nodeSessionOpen", true);
-    Reflect.set(gateway, "operatorSession", session);
+    Reflect.set(gateway, "readyState", gateway.OPEN);
+    setOpenOperatorSession(gateway, session);
 
     const handleOperatorSessionError = Reflect.get(gateway, "handleOperatorSessionError");
     if (typeof handleOperatorSessionError !== "function") throw new Error("GatewayDirectTransport.handleOperatorSessionError is unavailable");
@@ -2097,7 +2103,7 @@ describe("Gateway direct voice", () => {
       messages.push(JSON.parse((event as MessageEvent).data as string) as Record<string, unknown>);
     });
     Reflect.set(gateway, "nodeSessionOpen", true);
-    Reflect.set(gateway, "operatorSession", session);
+    setOpenOperatorSession(gateway, session);
 
     const handleOperatorSessionError = Reflect.get(gateway, "handleOperatorSessionError");
     if (typeof handleOperatorSessionError !== "function") throw new Error("GatewayDirectTransport.handleOperatorSessionError is unavailable");
@@ -2127,6 +2133,7 @@ describe("Gateway direct voice", () => {
     const nodeSession = { close: vi.fn() };
     Reflect.set(gateway, "nodeSession", nodeSession);
     Reflect.set(gateway, "nodeSessionOpen", true);
+    Reflect.set(gateway, "readyState", gateway.OPEN);
     Reflect.set(gateway, "operatorSession", null);
 
     expect(gateway.retryOperatorApproval()).toBe(true);
@@ -2135,6 +2142,7 @@ describe("Gateway direct voice", () => {
     expect(gateway.canSendNodeCommandResult()).toBe(true);
     expect(nodeSession.close).not.toHaveBeenCalled();
     expect(Reflect.get(gateway, "operatorSession")).not.toBeNull();
+    await expect(gateway.request("sessions.list")).rejects.toThrow("operator session is not connected");
     await vi.waitFor(() => expect(FakeGatewayWebSocket.instances).toHaveLength(1));
   });
 
@@ -2152,7 +2160,7 @@ describe("Gateway direct voice", () => {
     });
     Reflect.set(gateway, "nodeSessionOpen", true);
     Reflect.set(gateway, "nodeSession", { close: vi.fn() });
-    Reflect.set(gateway, "operatorSession", session);
+    setOpenOperatorSession(gateway, session);
 
     const handleOperatorSessionError = Reflect.get(gateway, "handleOperatorSessionError");
     if (typeof handleOperatorSessionError !== "function") throw new Error("GatewayDirectTransport.handleOperatorSessionError is unavailable");

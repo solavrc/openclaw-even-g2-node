@@ -1067,6 +1067,7 @@ export class GatewayDirectTransport extends EventTarget {
   private connectedNodeId = "";
   private nodeInvokeNodeIds = new Map<string, string>();
   private nodeSessionOpen = false;
+  private operatorSessionOpen = false;
   private gatewayClientId: GatewayClientId = "openclaw-even-g2-node";
   private triedLegacyClientId = false;
   private nodeApprovalPollTimer: ReturnType<typeof setTimeout> | null = null;
@@ -1149,6 +1150,7 @@ export class GatewayDirectTransport extends EventTarget {
     if (this.readyState === WebSocket.CLOSED) return;
     this.readyState = WebSocket.CLOSED;
     this.nodeSessionOpen = false;
+    this.operatorSessionOpen = false;
     this.clearNodeApprovalPoll();
     const voice = this.voiceTransport;
     const nodeSession = this.nodeSession;
@@ -1182,8 +1184,9 @@ export class GatewayDirectTransport extends EventTarget {
       config,
       getSessionKey: () => this.selectedSessionKey,
       request: async (method, params, timeoutMs) => {
-        if (!this.operatorSession) throw new Error("operator session is not connected");
-        return this.operatorSession.request(method, params, timeoutMs);
+        const session = this.openOperatorSession();
+        if (!session) throw new Error("operator session is not connected");
+        return session.request(method, params, timeoutMs);
       },
       onClose: () => {
         if (this.voiceTransport === voice) this.voiceTransport = null;
@@ -1194,8 +1197,9 @@ export class GatewayDirectTransport extends EventTarget {
   }
 
   request<T = unknown>(method: string, params?: unknown, timeoutMs?: number): Promise<T> {
-    if (!this.operatorSession) return Promise.reject(new Error("operator session is not connected"));
-    return this.operatorSession.request<T>(method, params, timeoutMs);
+    const session = this.openOperatorSession();
+    if (!session) return Promise.reject(new Error("operator session is not connected"));
+    return session.request<T>(method, params, timeoutMs);
   }
 
   retryOperatorApproval() {
@@ -1205,6 +1209,8 @@ export class GatewayDirectTransport extends EventTarget {
   }
 
   private connectOperator() {
+    this.operatorSessionOpen = false;
+    if (this.readyState !== WebSocket.CLOSED) this.readyState = WebSocket.CONNECTING;
     const session = new GatewayWsSession({
       url: this.setup.url,
       token: this.options.token,
@@ -1228,6 +1234,7 @@ export class GatewayDirectTransport extends EventTarget {
         const defaults = asObject(snapshot?.sessionDefaults);
         const mainSessionKey = asString(defaults?.mainSessionKey);
         if (!this.selectedSessionKey) this.selectedSessionKey = mainSessionKey || FALLBACK_MAIN_SESSION_KEY;
+        this.operatorSessionOpen = true;
         this.readyState = WebSocket.OPEN;
         this.dispatchEvent(new Event("open"));
         this.emit({ type: "ready", service: "openclaw-gateway-direct" });
@@ -1255,29 +1262,33 @@ export class GatewayDirectTransport extends EventTarget {
     });
   }
 
+  private openOperatorSession() {
+    return this.operatorSessionOpen ? this.operatorSession : null;
+  }
+
   private async handleAppCommand(msg: DirectAppCommand) {
     try {
       switch (msg.type) {
         case "eveng2.session.config.get":
-          if (!this.operatorSession) return;
+          if (!this.openOperatorSession()) return;
           this.emit({ type: "eveng2.session.config.snapshot", sessionKey: this.selectedSessionKey });
           return;
         case "eveng2.session.list":
-          if (!this.operatorSession) return;
+          if (!this.openOperatorSession()) return;
           await this.refreshSessions();
           return;
         case "eveng2.session.transcript.get":
-          if (!this.operatorSession) return;
+          if (!this.openOperatorSession()) return;
           await this.refreshTranscript(msg.sessionKey || this.selectedSessionKey, msg.limit);
           return;
         case "eveng2.session.switch":
-          if (!this.operatorSession) return;
+          if (!this.openOperatorSession()) return;
           if (msg.sessionKey) this.selectedSessionKey = msg.sessionKey;
           this.emit({ type: "eveng2.session.switch.applied", sessionKey: this.selectedSessionKey });
           await this.refreshTranscript(this.selectedSessionKey);
           return;
         case "eveng2.session.create":
-          if (!this.operatorSession) return;
+          if (!this.openOperatorSession()) return;
           try {
             await this.createSession(msg.label);
           } catch (error) {
@@ -1288,7 +1299,7 @@ export class GatewayDirectTransport extends EventTarget {
           }
           return;
         case "eveng2.session.send":
-          if (!this.operatorSession) return;
+          if (!this.openOperatorSession()) return;
           await this.sendSessionMessage(msg);
           return;
         case "eveng2.node.command.result":
@@ -1312,12 +1323,15 @@ export class GatewayDirectTransport extends EventTarget {
           }
           return;
         case "eveng2.node.approval.refresh":
-          if (!this.operatorSession) return;
+          if (!this.openOperatorSession()) return;
           await this.refreshNodeApprovalStatus();
           return;
         case "eveng2.approval.resolve":
-          if (!this.operatorSession) return;
-          await this.operatorSession.request("exec.approval.resolve", { id: msg.id || msg.requestId, decision: msg.decision });
+          {
+            const session = this.openOperatorSession();
+            if (!session) return;
+            await session.request("exec.approval.resolve", { id: msg.id || msg.requestId, decision: msg.decision });
+          }
           this.emit({ type: "eveng2.approval.resolve.ack", id: msg.id, requestId: msg.requestId, decision: msg.decision, status: "accepted" });
           return;
       }
@@ -1327,7 +1341,7 @@ export class GatewayDirectTransport extends EventTarget {
   }
 
   private async refreshSessions() {
-    const payload = await this.operatorSession?.request("sessions.list", {
+    const payload = await this.openOperatorSession()?.request("sessions.list", {
       includeGlobal: true,
       includeUnknown: false,
       configuredAgentsOnly: true,
@@ -1366,7 +1380,7 @@ export class GatewayDirectTransport extends EventTarget {
   private async refreshTranscript(sessionKey: string, limit = DEFAULT_TRANSCRIPT_RAW_LIMIT) {
     const safeLimit = Math.max(1, Math.floor(limit));
     try {
-      const payload = await this.operatorSession?.request("chat.history", { sessionKey, limit: safeLimit, maxChars: transcriptMaxCharsForLimit(safeLimit) });
+      const payload = await this.openOperatorSession()?.request("chat.history", { sessionKey, limit: safeLimit, maxChars: transcriptMaxCharsForLimit(safeLimit) });
       const root = asObject(payload);
       const messages = (Array.isArray(root?.messages) ? root.messages : []).map((message) => asObject(message)).filter((message): message is Record<string, unknown> => Boolean(message)).map((message) => ({
         id: asString(message.id) || asString(message.messageId),
@@ -1400,7 +1414,7 @@ export class GatewayDirectTransport extends EventTarget {
   }
 
   private async createSession(label = "Even G2") {
-    const payload = await this.operatorSession?.request("sessions.create", {
+    const payload = await this.openOperatorSession()?.request("sessions.create", {
       parentSessionKey: this.selectedSessionKey,
       label,
     });
@@ -1418,7 +1432,7 @@ export class GatewayDirectTransport extends EventTarget {
       this.emit({ type: "error", error: "session message is empty" });
       return;
     }
-    await this.operatorSession?.request("chat.send", {
+    await this.openOperatorSession()?.request("chat.send", {
       sessionKey,
       message,
       ...(msg.idempotencyKey ? { idempotencyKey: msg.idempotencyKey } : {}),
@@ -1501,9 +1515,10 @@ export class GatewayDirectTransport extends EventTarget {
   }
 
   private async refreshNodeApprovalStatus() {
-    if (!this.operatorSession) return;
+    const session = this.openOperatorSession();
+    if (!session) return;
     try {
-      const payload = await this.operatorSession.request("node.list", {}, 5000);
+      const payload = await session.request("node.list", {}, 5000);
       const nodes = nodeCatalogRows(payload);
       const candidates = nodes.filter((node) => looksLikeEvenG2Node(node));
       const allSourcePendingCandidates = nodes.filter((node) => isPendingCatalogSource(node));
@@ -1552,7 +1567,7 @@ export class GatewayDirectTransport extends EventTarget {
       // Bounded operator tokens or older Gateways may not expose node catalog
       // reads. Connection and voice can still work, so keep this diagnostic-only.
     } finally {
-      if (this.readyState !== WebSocket.CLOSED && this.operatorSession) {
+      if (this.readyState !== WebSocket.CLOSED && this.openOperatorSession()) {
         this.scheduleNodeApprovalPoll(this.nodeApprovalPending ? 2500 : 15000);
       }
     }
@@ -1590,6 +1605,8 @@ export class GatewayDirectTransport extends EventTarget {
       const gatewayError = gatewayErrorFromConnectError(error);
       const requestId = requestIdFromGatewayError(gatewayError);
       const pauseReconnect = gatewayErrorRequestsReconnectPause(gatewayError) || shouldPauseOperatorReconnect(error.message);
+      if (this.readyState !== WebSocket.CLOSED) this.readyState = WebSocket.CONNECTING;
+      this.operatorSessionOpen = false;
       this.operatorSession = null;
       session.close();
       this.emit({
@@ -1608,6 +1625,8 @@ export class GatewayDirectTransport extends EventTarget {
     if (this.operatorSession !== session) return;
     const reason = closeReasonFromEvent(event);
     if (this.nodeSessionOpen) {
+      if (this.readyState !== WebSocket.CLOSED) this.readyState = WebSocket.CONNECTING;
+      this.operatorSessionOpen = false;
       this.operatorSession = null;
       const pauseReconnect = shouldPauseOperatorReconnect(reason);
       if (reason) {
