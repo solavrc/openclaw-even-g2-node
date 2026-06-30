@@ -26,6 +26,13 @@ describe("e2e onboarding agent smoke helpers", () => {
     expect(args.sessionKey).toBe("agent:main:eveng2-onboarding-smoke-2026-06-30T01-02-03-000Z");
   });
 
+  it("adds the host-reachable Gateway URL to isolated onboarding prompts", () => {
+    const args = parseArgs(["--gateway-url", "ws://127.0.0.1:19002"], new Date("2026-06-30T01:02:03.000Z"));
+
+    expect(args.gatewayUrl).toBe("ws://127.0.0.1:19002");
+    expect(args.message).toBe(setupOpenClawAskRequest("ws://127.0.0.1:19002"));
+  });
+
   it("extracts assistant text from structured OpenClaw Agent JSON", () => {
     const stdout = JSON.stringify({
       events: [
@@ -85,5 +92,20 @@ describe("e2e onboarding agent smoke helpers", () => {
     expect(agentOnboardingVerdict({ ...okCommand, stdout: promptOnly }, extractAgentResponseText(promptOnly)).ok).toBe(false);
     expect(extractAgentResponseText(rawPromptEcho)).toBe(rawPromptEcho);
     expect(agentOnboardingVerdict({ ...okCommand, stdout: rawPromptEcho }, extractAgentResponseText(rawPromptEcho)).ok).toBe(false);
+  });
+
+  it("requires isolated Agent responses to preserve the host Gateway URL", () => {
+    const gatewayUrl = "ws://127.0.0.1:19002";
+    const response = "OpenClaw displayed the Even G2 setup QR for ws://127.0.0.1:19002. Scan the setup code from the phone.";
+    const bridgeResponse = "OpenClaw displayed the Even G2 setup QR for ws://172.17.0.2:19001. Scan the setup code from the phone.";
+
+    expect(agentOnboardingVerdict({ ...okCommand, stdout: response }, response, {
+      gatewayUrl,
+      promptText: setupOpenClawAskRequest(gatewayUrl),
+    }).ok).toBe(true);
+    expect(agentOnboardingVerdict({ ...okCommand, stdout: bridgeResponse }, bridgeResponse, {
+      gatewayUrl,
+      promptText: setupOpenClawAskRequest(gatewayUrl),
+    }).ok).toBe(false);
   });
 });

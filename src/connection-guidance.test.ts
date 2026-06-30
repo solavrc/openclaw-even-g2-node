@@ -10,6 +10,7 @@ import {
   setupQrScanFailedHudFrame,
   setupQrScanPromptHudFrame,
   setupQrScannedHudFrame,
+  shouldRetryWhileAwaitingApproval,
 } from "./connection-guidance";
 
 describe("guidanceForConnectionState", () => {
@@ -85,6 +86,22 @@ describe("connectionErrorPresentationPlan", () => {
       },
       reconnectReason: "",
     });
+  });
+
+  it("allows automatic retry while waiting for approval but not auth pauses", () => {
+    const approvalPlan = connectionErrorPresentationPlan(
+      "error: higher role than currently approved",
+      "higher role than currently approved",
+      true,
+    );
+    const authPausePlan = connectionErrorPresentationPlan(
+      "error: too many failed authentication attempts",
+      "too many failed authentication attempts",
+      true,
+    );
+
+    expect(shouldRetryWhileAwaitingApproval(approvalPlan)).toBe(true);
+    expect(shouldRetryWhileAwaitingApproval(authPausePlan)).toBe(false);
   });
 
   it("falls back to a glass error frame when no guidance matches", () => {

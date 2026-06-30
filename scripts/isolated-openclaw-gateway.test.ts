@@ -370,7 +370,14 @@ describe("isolated OpenClaw Gateway Docker plan", () => {
       "--openclaw-token",
       "unit-token",
     ]);
+    expect(plan.e2eOnboardingArgs).toEqual([
+      "--openclaw-container",
+      "openclaw-even-g2-node-test-unit-run",
+      "--gateway-url",
+      "ws://127.0.0.1:19002",
+    ]);
     expect(plan.e2eAgentEnv.EVENG2_E2E_NODE).toBe("auto");
+    expect(plan.e2eOnboardingEnv.EVENG2_E2E_GATEWAY_URL).toBe("ws://127.0.0.1:19002");
     expect(plan.approvalCommand).toEqual([
       "pnpm",
       "device:approve:latest",

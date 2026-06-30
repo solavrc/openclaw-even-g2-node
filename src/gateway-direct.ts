@@ -410,8 +410,7 @@ function connectAuthPlan(options: GatewayConnectOptions, storedAuth?: DeviceAuth
   const explicitToken = options.token?.trim() || "";
   const storedToken = storedAuth?.token?.trim() || "";
   const bootstrapToken = options.bootstrapToken?.trim() || "";
-  const useBootstrap = Boolean(bootstrapToken) && !explicitToken;
-  const authToken = explicitToken || (useBootstrap ? "" : storedToken);
+  const authToken = explicitToken || storedToken;
   const auth = authToken
     ? { token: authToken }
     : bootstrapToken
@@ -426,6 +425,53 @@ function connectAuthPlan(options: GatewayConnectOptions, storedAuth?: DeviceAuth
   };
 }
 
+async function buildConnectParamsWithAuthPlan(input: {
+  identity: DeviceIdentity;
+  nonce: string;
+  options: GatewayConnectOptions;
+  storedAuth?: DeviceAuthEntry | null;
+}) {
+  const authPlan = connectAuthPlan(input.options, input.storedAuth);
+  const signedAtMs = Date.now();
+  const payload = buildDeviceAuthPayloadV3({
+    deviceId: input.identity.deviceId,
+    clientId: input.options.client.id,
+    clientMode: input.options.client.mode,
+    role: input.options.role,
+    scopes: authPlan.scopes,
+    signedAtMs,
+    token: authPlan.signatureToken,
+    nonce: input.nonce,
+    platform: input.options.client.platform,
+    deviceFamily: input.options.client.deviceFamily,
+  });
+  const identityStore = input.options.identityStore || new BrowserDeviceIdentityStore();
+  const signature = await identityStore.sign(payload, input.identity);
+  return {
+    authSource: authPlan.authSource,
+    params: {
+      minProtocol: 3,
+      maxProtocol: 4,
+      client: input.options.client,
+      ...(input.options.caps.length ? { caps: input.options.caps } : {}),
+      ...(input.options.commands.length ? { commands: input.options.commands } : {}),
+      ...(input.options.permissions && Object.keys(input.options.permissions).length ? { permissions: input.options.permissions } : {}),
+      role: input.options.role,
+      ...(authPlan.scopes.length ? { scopes: authPlan.scopes } : {}),
+      ...(authPlan.auth ? { auth: authPlan.auth } : {}),
+      locale: typeof navigator === "undefined" ? "en-US" : navigator.language || "en-US",
+      userAgent: input.options.userAgent,
+      device: {
+        id: input.identity.deviceId,
+        publicKey: input.identity.publicKeyRawBase64Url,
+        signature,
+        signedAt: signedAtMs,
+        nonce: input.nonce,
+      },
+    },
+  };
+}
+
 export async function buildConnectParams({
   identity,
   nonce,
@@ -437,42 +483,7 @@ export async function buildConnectParams({
   options: GatewayConnectOptions;
   storedAuth?: DeviceAuthEntry | null;
 }) {
-  const authPlan = connectAuthPlan(options, storedAuth);
-  const signedAtMs = Date.now();
-  const payload = buildDeviceAuthPayloadV3({
-    deviceId: identity.deviceId,
-    clientId: options.client.id,
-    clientMode: options.client.mode,
-    role: options.role,
-    scopes: authPlan.scopes,
-    signedAtMs,
-    token: authPlan.signatureToken,
-    nonce,
-    platform: options.client.platform,
-    deviceFamily: options.client.deviceFamily,
-  });
-  const identityStore = options.identityStore || new BrowserDeviceIdentityStore();
-  const signature = await identityStore.sign(payload, identity);
-  return {
-    minProtocol: 3,
-    maxProtocol: 4,
-    client: options.client,
-    ...(options.caps.length ? { caps: options.caps } : {}),
-    ...(options.commands.length ? { commands: options.commands } : {}),
-    ...(options.permissions && Object.keys(options.permissions).length ? { permissions: options.permissions } : {}),
-    role: options.role,
-    ...(authPlan.scopes.length ? { scopes: authPlan.scopes } : {}),
-    ...(authPlan.auth ? { auth: authPlan.auth } : {}),
-    locale: typeof navigator === "undefined" ? "en-US" : navigator.language || "en-US",
-    userAgent: options.userAgent,
-    device: {
-      id: identity.deviceId,
-      publicKey: identity.publicKeyRawBase64Url,
-      signature,
-      signedAt: signedAtMs,
-      nonce,
-    },
-  };
+  return (await buildConnectParamsWithAuthPlan({ identity, nonce, options, storedAuth })).params;
 }
 
 export class GatewayWsSession {
@@ -483,6 +494,9 @@ export class GatewayWsSession {
   private readonly authStore: DeviceAuthStorage;
   private closed = false;
   private generation = 0;
+  private lastConnectAuthSource: ConnectAuthPlan["authSource"] = "none";
+  private lastConnectNonce = "";
+  private retriedStoredTokenFailureWithBootstrap = false;
 
   constructor(private readonly options: GatewayConnectOptions) {
     this.identityStore = options.identityStore || new BrowserDeviceIdentityStore();
@@ -498,6 +512,9 @@ export class GatewayWsSession {
     const generation = this.generation + 1;
     this.generation = generation;
     this.closed = false;
+    this.lastConnectAuthSource = "none";
+    this.lastConnectNonce = "";
+    this.retriedStoredTokenFailureWithBootstrap = false;
     const identity = await this.identityStore.loadOrCreate();
     if (!this.isCurrentGeneration(generation)) return;
     const ws = new WebSocketCtor(this.options.url);
@@ -603,6 +620,7 @@ export class GatewayWsSession {
       } else if (frame.id === "__connect__" && !frame.ok) {
         if (ws && !this.isCurrentSocket(ws, generation)) return;
         if (!ws && this.closed) return;
+        if (await this.retryWithBootstrapAfterStoredTokenFailure(frame.error, identity, ws, generation)) return;
         this.options.onError?.(new GatewayConnectError(frame.error?.message || frame.error?.details?.code || frame.error?.code || "gateway connect failed", frame.error));
       }
       this.resolvePending(frame.id, { ok: frame.ok, payload: frame.payload, error: frame.error });
@@ -615,21 +633,69 @@ export class GatewayWsSession {
         ? String((payload as { nonce?: unknown }).nonce || "")
         : "";
       if (!nonce) return;
-      const params = await buildConnectParams({
+      const connect = await buildConnectParamsWithAuthPlan({
         identity,
         nonce,
         options: this.options,
         storedAuth: this.authStore.load(identity.deviceId, this.options.role, this.options.url),
       });
+      this.lastConnectAuthSource = connect.authSource;
+      this.lastConnectNonce = nonce;
       if (ws) {
         if (!this.isCurrentSocket(ws, generation)) return;
-        ws.send(gatewayRpcRequestText("__connect__", "connect", params));
+        ws.send(gatewayRpcRequestText("__connect__", "connect", connect.params));
       } else {
-        this.ws?.send(gatewayRpcRequestText("__connect__", "connect", params));
+        this.ws?.send(gatewayRpcRequestText("__connect__", "connect", connect.params));
       }
       return;
     }
     this.options.onEvent?.(frame.event, payload);
+  }
+
+  private shouldRetryWithBootstrapAfterStoredTokenFailure(error?: GatewayErrorShape) {
+    if (this.retriedStoredTokenFailureWithBootstrap || this.lastConnectAuthSource !== "device-token") return false;
+    if (!this.lastConnectNonce) return false;
+    if (!this.options.bootstrapToken?.trim()) return false;
+    if (error?.details?.pauseReconnect || error?.code === "auth_paused") return false;
+    const normalized = [
+      error?.code,
+      error?.message,
+      error?.details?.code,
+      error?.details?.reason,
+    ].filter(Boolean).join(" ").toLowerCase();
+    if (normalized.includes("too many failed authentication attempts")) return false;
+    return (
+      normalized.includes("auth") ||
+      normalized.includes("unauthorized") ||
+      normalized.includes("token") ||
+      normalized.includes("not approved") ||
+      normalized.includes("approval") ||
+      normalized.includes("pairing")
+    );
+  }
+
+  private async retryWithBootstrapAfterStoredTokenFailure(
+    error: GatewayErrorShape | undefined,
+    identity: DeviceIdentity,
+    ws: GatewayWebSocket | null,
+    generation: number,
+  ) {
+    if (!this.shouldRetryWithBootstrapAfterStoredTokenFailure(error)) return false;
+    this.retriedStoredTokenFailureWithBootstrap = true;
+    const connect = await buildConnectParamsWithAuthPlan({
+      identity,
+      nonce: this.lastConnectNonce,
+      options: this.options,
+      storedAuth: null,
+    });
+    this.lastConnectAuthSource = connect.authSource;
+    if (ws) {
+      if (!this.isCurrentSocket(ws, generation)) return true;
+      ws.send(gatewayRpcRequestText("__connect__", "connect", connect.params));
+    } else {
+      this.ws?.send(gatewayRpcRequestText("__connect__", "connect", connect.params));
+    }
+    return true;
   }
 
   private persistAuth(payload: unknown, deviceId: string) {

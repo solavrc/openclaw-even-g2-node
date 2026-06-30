@@ -118,7 +118,7 @@ function lastConnectParams(ws: FakeGatewayWebSocket) {
     }
   }
   if (!raw) throw new Error("No connect frame was sent.");
-  return JSON.parse(raw) as { params?: { client?: { id?: string } } };
+  return JSON.parse(raw) as { params?: { auth?: unknown; client?: { id?: string }; device?: { signature?: string } } };
 }
 
 describe("Gateway direct setup", () => {
@@ -253,13 +253,13 @@ describe("Gateway direct setup", () => {
     expect(params.device.signature).toContain("v3|device-1|openclaw-even-g2-node|node|node|node.register|1700000000000|shared-token|nonce|even-g2|glasses");
   });
 
-  it("prefers a fresh bootstrap setup token over a stale node device token", async () => {
+  it("prefers a stored node device token over setup bootstrap when pairing is already approved", async () => {
     vi.spyOn(Date, "now").mockReturnValue(1700000000000);
     const params = await buildConnectParams({
       identity,
       nonce: "nonce",
       storedAuth: {
-        token: "stale-device-token",
+        token: "stored-device-token",
         role: "node",
         scopes: ["node.invoke"],
         updatedAtMs: 1,
@@ -281,11 +281,11 @@ describe("Gateway direct setup", () => {
       },
     });
 
-    expect(params.auth).toEqual({ bootstrapToken: "fresh-bootstrap" });
-    expect(params.device.signature).toContain("v3|device-1|openclaw-even-g2-node|node|node||1700000000000|fresh-bootstrap|nonce|even-g2|glasses");
+    expect(params.auth).toEqual({ token: "stored-device-token" });
+    expect(params.device.signature).toContain("v3|device-1|openclaw-even-g2-node|node|node||1700000000000|stored-device-token|nonce|even-g2|glasses");
   });
 
-  it("prefers a fresh bootstrap setup token over a stale operator device token", async () => {
+  it("prefers a stored operator device token over setup bootstrap when pairing is already approved", async () => {
     vi.spyOn(Date, "now").mockReturnValue(1700000000000);
     const params = await buildConnectParams({
       identity,
@@ -313,8 +313,8 @@ describe("Gateway direct setup", () => {
       },
     });
 
-    expect(params.auth).toEqual({ bootstrapToken: "fresh-bootstrap" });
-    expect(params.device.signature).toContain("v3|device-1|openclaw-even-g2-node|ui|operator|operator.read|1700000000000|fresh-bootstrap|nonce|even-g2|glasses");
+    expect(params.auth).toEqual({ token: "stored-operator-token" });
+    expect(params.device.signature).toContain("v3|device-1|openclaw-even-g2-node|ui|operator|operator.read|1700000000000|stored-operator-token|nonce|even-g2|glasses");
   });
 
   it("clears stored browser device credentials during local pairing reset", () => {
@@ -479,6 +479,51 @@ describe("Gateway session events", () => {
       error: "too many failed authentication attempts",
       pauseReconnect: true,
     }));
+  });
+
+  it("falls back to setup bootstrap once when a stored device token is rejected", async () => {
+    vi.spyOn(Date, "now").mockReturnValue(1700000000000);
+    const storage = new MemoryStorage();
+    const authStore = new BrowserDeviceAuthStore(storage);
+    authStore.save(identity.deviceId, "node", "stored-device-token", [], "wss://gateway.example.test");
+    const session = new GatewayWsSession({
+      url: "wss://gateway.example.test",
+      bootstrapToken: "fresh-bootstrap",
+      role: "node",
+      scopes: [],
+      caps: ["device"],
+      commands: ["device.status"],
+      client: buildEvenG2ClientInfo("node", "inst-1"),
+      userAgent: "test",
+      WebSocketCtor: FakeGatewayWebSocketCtor,
+      identityStore: {
+        loadOrCreate: async () => identity,
+        sign: async (payload: string) => `sig:${payload}`,
+      },
+      authStore,
+    });
+
+    await session.connect();
+    const ws = FakeGatewayWebSocket.instances[0]!;
+    ws.receive({ type: "event", event: "connect.challenge", payload: { nonce: "nonce-1" } });
+    await vi.waitFor(() => expect(lastConnectParams(ws).params?.auth).toEqual({ token: "stored-device-token" }));
+
+    ws.receive({
+      type: "res",
+      id: "__connect__",
+      ok: false,
+      error: {
+        code: "unauthorized",
+        message: "device token revoked",
+      },
+    });
+
+    await vi.waitFor(() => {
+      expect(ws.sent.filter((item) => item.includes("\"method\":\"connect\""))).toHaveLength(2);
+    });
+    const retry = lastConnectParams(ws);
+    expect(retry.params?.auth).toEqual({ bootstrapToken: "fresh-bootstrap" });
+    expect(retry.params?.device?.signature).toContain("v3|device-1|openclaw-even-g2-node|node|node||1700000000000|fresh-bootstrap|nonce-1|even-g2|glasses");
   });
 
   it("ignores late node-open callbacks after the direct transport closes", async () => {

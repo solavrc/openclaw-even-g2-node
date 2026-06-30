@@ -9,6 +9,7 @@ import { errorStack } from "./strict-helpers.ts";
 
 export type ParsedArgs = {
   agent: string;
+  gatewayUrl: string;
   message: string;
   openclawContainer: string;
   openclawProfile: string;
@@ -34,6 +35,7 @@ export type OnboardingCheck = {
 };
 
 const DEFAULT_OUT_ROOT = path.join(process.cwd(), ".openclaw-even-g2-node", "onboarding-agent-runs");
+const DEFAULT_GATEWAY_URL = process.env.EVENG2_E2E_GATEWAY_URL || "";
 const DEFAULT_OPENCLAW_CONTAINER = process.env.EVENG2_E2E_OPENCLAW_CONTAINER || "";
 const DEFAULT_OPENCLAW_PROFILE = process.env.EVENG2_E2E_OPENCLAW_PROFILE || "";
 const DEFAULT_TIMEOUT_SECONDS = 180;
@@ -45,6 +47,7 @@ Usage:
 
 Options:
   --out-dir <path>          Output directory. Default: .openclaw-even-g2-node/onboarding-agent-runs/<timestamp>
+  --gateway-url <url>       Host-reachable Gateway URL to request in the setup QR. Default: EVENG2_E2E_GATEWAY_URL
   --openclaw-container <n>  OpenClaw container name for isolated Gateway Agent execution. Default: EVENG2_E2E_OPENCLAW_CONTAINER
   --openclaw-profile <name> OpenClaw CLI profile for host Agent execution. Default: EVENG2_E2E_OPENCLAW_PROFILE or current CLI profile
   --agent <id>              Agent id. Default: main
@@ -72,9 +75,11 @@ function readPositiveInteger(value: string, flag: string) {
 
 export function parseArgs(argv: string[], now = new Date()): ParsedArgs {
   const timestamp = timestampSlug(now);
+  let messageWasSet = false;
   const args: ParsedArgs = {
     agent: "main",
-    message: setupOpenClawAskRequest(),
+    gatewayUrl: DEFAULT_GATEWAY_URL,
+    message: "",
     openclawContainer: DEFAULT_OPENCLAW_CONTAINER,
     openclawProfile: DEFAULT_OPENCLAW_PROFILE,
     outDir: path.join(DEFAULT_OUT_ROOT, timestamp),
@@ -89,6 +94,9 @@ export function parseArgs(argv: string[], now = new Date()): ParsedArgs {
     } else if (arg === "--out-dir") {
       args.outDir = path.resolve(readFlagValue(argv, index, arg));
       index += 1;
+    } else if (arg === "--gateway-url") {
+      args.gatewayUrl = readFlagValue(argv, index, arg).trim();
+      index += 1;
     } else if (arg === "--openclaw-container") {
       args.openclawContainer = readFlagValue(argv, index, arg);
       index += 1;
@@ -100,6 +108,7 @@ export function parseArgs(argv: string[], now = new Date()): ParsedArgs {
       index += 1;
     } else if (arg === "--message") {
       args.message = readFlagValue(argv, index, arg);
+      messageWasSet = true;
       index += 1;
     } else if (arg === "--session-key") {
       args.sessionKey = readFlagValue(argv, index, arg);
@@ -115,6 +124,9 @@ export function parseArgs(argv: string[], now = new Date()): ParsedArgs {
     }
   }
 
+  if (!messageWasSet) {
+    args.message = setupOpenClawAskRequest(args.gatewayUrl);
+  }
   if (!args.sessionKey) {
     args.sessionKey = `agent:${args.agent}:eveng2-onboarding-smoke-${timestamp}`;
   }
@@ -206,18 +218,44 @@ function normalizeText(value: string) {
   return value.toLowerCase().replace(/\s+/g, " ").trim();
 }
 
-function looksLikePromptEcho(responseText: string) {
+function looksLikePromptEcho(responseText: string, promptText = setupOpenClawAskRequest()) {
   const normalized = normalizeText(responseText);
-  const prompt = normalizeText(setupOpenClawAskRequest());
+  const prompt = normalizeText(promptText);
   if (!normalized || !prompt) return false;
   if (normalized === prompt) return true;
   const withoutCommonPrefix = normalized.replace(/^(?:prompt|input|user|message|request|submitted prompt)\s*[:>-]\s*/, "");
   return withoutCommonPrefix === prompt;
 }
 
-export function agentOnboardingVerdict(command: AgentCommandEvidence, responseText: string) {
+function hostPortFromGatewayUrl(gatewayUrl: string) {
+  try {
+    const parsed = new URL(gatewayUrl);
+    return parsed.host.toLowerCase();
+  } catch {
+    return "";
+  }
+}
+
+function includesGatewayTarget(responseText: string, gatewayUrl: string) {
+  const target = gatewayUrl.trim().toLowerCase();
+  if (!target) return true;
+  const normalized = responseText.toLowerCase();
+  const hostPort = hostPortFromGatewayUrl(target);
+  return normalized.includes(target) || Boolean(hostPort && normalized.includes(hostPort));
+}
+
+function containsContainerBridgeAddress(responseText: string) {
+  return /\b172\.(?:1[6-9]|2\d|3[0-1])\.\d{1,3}\.\d{1,3}\b/.test(responseText);
+}
+
+export function agentOnboardingVerdict(
+  command: AgentCommandEvidence,
+  responseText: string,
+  options: { gatewayUrl?: string; promptText?: string } = {},
+) {
   const normalized = normalizeText(responseText);
-  const promptEcho = looksLikePromptEcho(responseText);
+  const promptEcho = looksLikePromptEcho(responseText, options.promptText);
+  const gatewayUrl = options.gatewayUrl?.trim() || "";
   const checks: OnboardingCheck[] = [
     {
       name: "agent-command-exit",
@@ -248,6 +286,20 @@ export function agentOnboardingVerdict(command: AgentCommandEvidence, responseTe
       ok: /openclaw|open claw|\bclaw\b/.test(normalized),
       detail: "response should route the user through OpenClaw, not a generic QR flow",
     },
+    ...(gatewayUrl
+      ? [
+        {
+          name: "host-gateway-url",
+          ok: includesGatewayTarget(responseText, gatewayUrl),
+          detail: `response should preserve the host-reachable Gateway URL ${gatewayUrl}`,
+        },
+        {
+          name: "no-container-bridge-url",
+          ok: !containsContainerBridgeAddress(responseText),
+          detail: "response should not expose Docker bridge URLs that the phone cannot reach",
+        },
+      ]
+      : []),
   ];
   return {
     checks,
@@ -352,7 +404,10 @@ async function main() {
 
   const command = runAgentCommand(args);
   const responseText = extractAgentResponseText(command.stdout, command.json);
-  const verdict = agentOnboardingVerdict(command, responseText);
+  const verdict = agentOnboardingVerdict(command, responseText, {
+    gatewayUrl: args.gatewayUrl,
+    promptText: args.message,
+  });
   const evidencePath = path.join(args.outDir, "evidence.json");
   const manifestPath = path.join(args.outDir, "manifest.json");
   const reportPath = path.join(args.outDir, "report.md");
@@ -361,6 +416,7 @@ async function main() {
     command,
     prompt: {
       askOpenClawWith: args.message,
+      gatewayUrl: args.gatewayUrl || null,
       source: "src/openclaw-ask-requests.ts setupOpenClawAskRequest(), consumed by setupHudFrame()",
     },
     responseText,

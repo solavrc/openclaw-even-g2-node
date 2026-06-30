@@ -127,6 +127,7 @@ import {
   setupQrScanFailedHudFrame,
   setupQrScanPromptHudFrame,
   setupQrScannedHudFrame,
+  shouldRetryWhileAwaitingApproval,
 } from "./connection-guidance";
 import {
   createEvenHubLifecycleDedupe,
@@ -2226,11 +2227,14 @@ export function App() {
   function handleGatewayErrorMessage(msg: GatewayErrorMessage) {
     const nextStatus = gatewayErrorStatusFromMessage(msg);
     const plan = connectionErrorPresentationPlan(nextStatus, msg.error, Boolean(gatewayUrlRef.current.trim()));
-    reconnectPausedRef.current = msg.pauseReconnect === true || plan.reconnectReason === "";
+    const retryAwaitingApproval = msg.pauseReconnect === true && shouldRetryWhileAwaitingApproval(plan);
+    reconnectPausedRef.current = (msg.pauseReconnect === true && !retryAwaitingApproval) || plan.reconnectReason === "";
     setStatus(nextStatus);
     if (plan.target === "guidance") void renderConnectionGuidance(plan.statusText);
     else void renderGlass(plan.frame);
-    if (!msg.pauseReconnect && plan.reconnectReason) scheduleReconnect(plan.reconnectReason);
+    if ((msg.pauseReconnect !== true || retryAwaitingApproval) && plan.reconnectReason) {
+      scheduleReconnect(retryAwaitingApproval ? nextStatus : plan.reconnectReason);
+    }
   }
 
   function handleGatewayMessage(ws: GatewayTransport, msg: GatewayMessage) {

@@ -329,6 +329,12 @@ export function connectionErrorPresentationPlan(
   };
 }
 
+export function shouldRetryWhileAwaitingApproval(plan: ConnectionErrorPresentationPlan) {
+  return plan.target === "guidance" &&
+    plan.reconnectReason !== "" &&
+    /^(?:Device|Operator|Node|Role|Extra) approval required$/.test(plan.guidance.title);
+}
+
 export function connectionGuidanceHudFrame(guidance: ConnectionGuidance): ConnectionHudFrame {
   const isPairingStep = /^(?:Device|Operator|Node|Role|Extra) approval required$/.test(guidance.title);
   if (guidance.title === "OpenClaw Node") {
