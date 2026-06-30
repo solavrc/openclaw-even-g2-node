@@ -208,7 +208,7 @@ export function redactText(value: string) {
     .replace(/("(?:token|secret|authorization|apiKey|api_key|auth|bootstrap|bootstrapToken|bootstrap_token|setup|setupCode|setup_code|setupToken|setup_token)"\s*:\s*")[^"]*(")/gi, "$1<redacted>$2")
     .replace(/(Bearer\s+)[A-Za-z0-9._~+/=-]+/gi, "$1<redacted>")
     .replace(/(--(?:token|openclaw-token|password|api-key|apiKey)\s+)[^\s"']+/gi, "$1<redacted>")
-    .replace(/((?:bootstrap|bootstrapToken|bootstrap_token|bootstraptoken|setup|setupCode|setup_code|setupToken|setup_token|setuptoken|token|apiKey|api_key|authorization|auth)=)[^&\s"']+/gi, "$1<redacted>")
+    .replace(/((?:bootstrap|bootstrapToken|bootstrap_token|bootstraptoken|setup|setupCode|setup_code|setupToken|setup_token|setuptoken|token|apiKey|api_key|authorization|auth|secret|password|pass)=)[^&\s"']+/gi, "$1<redacted>")
     .replace(/(wss?:\/\/[^/\s"'@]+:)[^@\s"']+@/gi, "$1<redacted>@");
 }
 

@@ -114,6 +114,7 @@ export type DeviceIdentitySigner = {
 
 export type DeviceAuthStorage = {
   load(deviceId: string, role: GatewayRole, gatewayUrl?: string): DeviceAuthEntry | null;
+  remove?(deviceId: string, role: GatewayRole, gatewayUrl?: string): void;
   save(deviceId: string, role: GatewayRole, token: string, scopes: string[], gatewayUrl?: string): void;
 };
 
@@ -347,6 +348,13 @@ export class BrowserDeviceAuthStore {
     this.storage.setItem(AUTH_STORAGE_KEY, JSON.stringify(root));
   }
 
+  remove(deviceId: string, role: GatewayRole, gatewayUrl = "") {
+    const root = this.loadRoot();
+    delete root[this.key(deviceId, role, gatewayUrl)];
+    if (Object.keys(root).length) this.storage.setItem(AUTH_STORAGE_KEY, JSON.stringify(root));
+    else this.storage.removeItem(AUTH_STORAGE_KEY);
+  }
+
   private key(deviceId: string, role: GatewayRole, gatewayUrl: string) {
     return `${deviceId.trim().toLowerCase()}.${role}.${normalizedGatewayAuthUrl(gatewayUrl)}`;
   }
@@ -410,8 +418,7 @@ function connectAuthPlan(options: GatewayConnectOptions, storedAuth?: DeviceAuth
   const explicitToken = options.token?.trim() || "";
   const storedToken = storedAuth?.token?.trim() || "";
   const bootstrapToken = options.bootstrapToken?.trim() || "";
-  const useBootstrap = Boolean(bootstrapToken) && !explicitToken;
-  const authToken = explicitToken || (useBootstrap ? "" : storedToken);
+  const authToken = explicitToken || storedToken;
   const auth = authToken
     ? { token: authToken }
     : bootstrapToken
@@ -426,6 +433,53 @@ function connectAuthPlan(options: GatewayConnectOptions, storedAuth?: DeviceAuth
   };
 }
 
+async function buildConnectParamsWithAuthPlan(input: {
+  identity: DeviceIdentity;
+  nonce: string;
+  options: GatewayConnectOptions;
+  storedAuth?: DeviceAuthEntry | null;
+}) {
+  const authPlan = connectAuthPlan(input.options, input.storedAuth);
+  const signedAtMs = Date.now();
+  const payload = buildDeviceAuthPayloadV3({
+    deviceId: input.identity.deviceId,
+    clientId: input.options.client.id,
+    clientMode: input.options.client.mode,
+    role: input.options.role,
+    scopes: authPlan.scopes,
+    signedAtMs,
+    token: authPlan.signatureToken,
+    nonce: input.nonce,
+    platform: input.options.client.platform,
+    deviceFamily: input.options.client.deviceFamily,
+  });
+  const identityStore = input.options.identityStore || new BrowserDeviceIdentityStore();
+  const signature = await identityStore.sign(payload, input.identity);
+  return {
+    authSource: authPlan.authSource,
+    params: {
+      minProtocol: 3,
+      maxProtocol: 4,
+      client: input.options.client,
+      ...(input.options.caps.length ? { caps: input.options.caps } : {}),
+      ...(input.options.commands.length ? { commands: input.options.commands } : {}),
+      ...(input.options.permissions && Object.keys(input.options.permissions).length ? { permissions: input.options.permissions } : {}),
+      role: input.options.role,
+      ...(authPlan.scopes.length ? { scopes: authPlan.scopes } : {}),
+      ...(authPlan.auth ? { auth: authPlan.auth } : {}),
+      locale: typeof navigator === "undefined" ? "en-US" : navigator.language || "en-US",
+      userAgent: input.options.userAgent,
+      device: {
+        id: input.identity.deviceId,
+        publicKey: input.identity.publicKeyRawBase64Url,
+        signature,
+        signedAt: signedAtMs,
+        nonce: input.nonce,
+      },
+    },
+  };
+}
+
 export async function buildConnectParams({
   identity,
   nonce,
@@ -437,42 +491,7 @@ export async function buildConnectParams({
   options: GatewayConnectOptions;
   storedAuth?: DeviceAuthEntry | null;
 }) {
-  const authPlan = connectAuthPlan(options, storedAuth);
-  const signedAtMs = Date.now();
-  const payload = buildDeviceAuthPayloadV3({
-    deviceId: identity.deviceId,
-    clientId: options.client.id,
-    clientMode: options.client.mode,
-    role: options.role,
-    scopes: authPlan.scopes,
-    signedAtMs,
-    token: authPlan.signatureToken,
-    nonce,
-    platform: options.client.platform,
-    deviceFamily: options.client.deviceFamily,
-  });
-  const identityStore = options.identityStore || new BrowserDeviceIdentityStore();
-  const signature = await identityStore.sign(payload, identity);
-  return {
-    minProtocol: 3,
-    maxProtocol: 4,
-    client: options.client,
-    ...(options.caps.length ? { caps: options.caps } : {}),
-    ...(options.commands.length ? { commands: options.commands } : {}),
-    ...(options.permissions && Object.keys(options.permissions).length ? { permissions: options.permissions } : {}),
-    role: options.role,
-    ...(authPlan.scopes.length ? { scopes: authPlan.scopes } : {}),
-    ...(authPlan.auth ? { auth: authPlan.auth } : {}),
-    locale: typeof navigator === "undefined" ? "en-US" : navigator.language || "en-US",
-    userAgent: options.userAgent,
-    device: {
-      id: identity.deviceId,
-      publicKey: identity.publicKeyRawBase64Url,
-      signature,
-      signedAt: signedAtMs,
-      nonce,
-    },
-  };
+  return (await buildConnectParamsWithAuthPlan({ identity, nonce, options, storedAuth })).params;
 }
 
 export class GatewayWsSession {
@@ -483,6 +502,9 @@ export class GatewayWsSession {
   private readonly authStore: DeviceAuthStorage;
   private closed = false;
   private generation = 0;
+  private lastConnectAuthSource: ConnectAuthPlan["authSource"] = "none";
+  private lastConnectNonce = "";
+  private retriedStoredTokenFailureWithBootstrap = false;
 
   constructor(private readonly options: GatewayConnectOptions) {
     this.identityStore = options.identityStore || new BrowserDeviceIdentityStore();
@@ -498,6 +520,9 @@ export class GatewayWsSession {
     const generation = this.generation + 1;
     this.generation = generation;
     this.closed = false;
+    this.lastConnectAuthSource = "none";
+    this.lastConnectNonce = "";
+    this.retriedStoredTokenFailureWithBootstrap = false;
     const identity = await this.identityStore.loadOrCreate();
     if (!this.isCurrentGeneration(generation)) return;
     const ws = new WebSocketCtor(this.options.url);
@@ -603,6 +628,7 @@ export class GatewayWsSession {
       } else if (frame.id === "__connect__" && !frame.ok) {
         if (ws && !this.isCurrentSocket(ws, generation)) return;
         if (!ws && this.closed) return;
+        if (await this.retryWithBootstrapAfterStoredTokenFailure(frame.error, identity, ws, generation)) return;
         this.options.onError?.(new GatewayConnectError(frame.error?.message || frame.error?.details?.code || frame.error?.code || "gateway connect failed", frame.error));
       }
       this.resolvePending(frame.id, { ok: frame.ok, payload: frame.payload, error: frame.error });
@@ -615,21 +641,74 @@ export class GatewayWsSession {
         ? String((payload as { nonce?: unknown }).nonce || "")
         : "";
       if (!nonce) return;
-      const params = await buildConnectParams({
+      const connect = await buildConnectParamsWithAuthPlan({
         identity,
         nonce,
         options: this.options,
         storedAuth: this.authStore.load(identity.deviceId, this.options.role, this.options.url),
       });
+      this.lastConnectAuthSource = connect.authSource;
+      this.lastConnectNonce = nonce;
       if (ws) {
         if (!this.isCurrentSocket(ws, generation)) return;
-        ws.send(gatewayRpcRequestText("__connect__", "connect", params));
+        ws.send(gatewayRpcRequestText("__connect__", "connect", connect.params));
       } else {
-        this.ws?.send(gatewayRpcRequestText("__connect__", "connect", params));
+        this.ws?.send(gatewayRpcRequestText("__connect__", "connect", connect.params));
       }
       return;
     }
     this.options.onEvent?.(frame.event, payload);
+  }
+
+  private shouldRetryWithBootstrapAfterStoredTokenFailure(error?: GatewayErrorShape) {
+    if (this.retriedStoredTokenFailureWithBootstrap || this.lastConnectAuthSource !== "device-token") return false;
+    if (!this.lastConnectNonce) return false;
+    if (!this.options.bootstrapToken?.trim()) return false;
+    if (gatewayErrorIsAuthPause(error)) return false;
+    const normalized = [
+      error?.code,
+      error?.message,
+      error?.details?.code,
+      error?.details?.reason,
+    ].filter(Boolean).join(" ").toLowerCase();
+    if (normalized.includes("too many failed authentication attempts")) return false;
+    return (
+      normalized.includes("auth") ||
+      normalized.includes("unauthorized") ||
+      normalized.includes("token") ||
+      normalized.includes("not approved") ||
+      normalized.includes("approval") ||
+      normalized.includes("pairing") ||
+      normalized.includes("higher role") ||
+      normalized.includes("role-upgrade") ||
+      normalized.includes("role upgrade") ||
+      normalized.includes("scope upgrade")
+    );
+  }
+
+  private async retryWithBootstrapAfterStoredTokenFailure(
+    error: GatewayErrorShape | undefined,
+    identity: DeviceIdentity,
+    ws: GatewayWebSocket | null,
+    generation: number,
+  ) {
+    if (!this.shouldRetryWithBootstrapAfterStoredTokenFailure(error)) return false;
+    this.retriedStoredTokenFailureWithBootstrap = true;
+    this.authStore.remove?.(identity.deviceId, this.options.role, this.options.url);
+    const connect = await buildConnectParamsWithAuthPlan({
+      identity,
+      nonce: this.lastConnectNonce,
+      options: this.options,
+      storedAuth: null,
+    });
+    this.lastConnectAuthSource = connect.authSource;
+    if (ws) {
+      if (!this.isCurrentSocket(ws, generation)) return true;
+      ws.send(gatewayRpcRequestText("__connect__", "connect", connect.params));
+    } else {
+      this.ws?.send(gatewayRpcRequestText("__connect__", "connect", connect.params));
+    }
+    return true;
   }
 
   private persistAuth(payload: unknown, deviceId: string) {
@@ -670,6 +749,24 @@ function shouldPauseOperatorReconnect(reason: string) {
     normalized.includes("role upgrade") ||
     normalized.includes("scope upgrade")
   );
+}
+
+function gatewayErrorIsAuthPause(error?: GatewayErrorShape) {
+  const normalized = [
+    error?.code,
+    error?.details?.code,
+    error?.message,
+    error?.details?.reason,
+  ].filter(Boolean).join(" ").toLowerCase();
+  return (
+    normalized.includes("auth_paused") ||
+    normalized.includes("authentication paused") ||
+    normalized.includes("too many failed authentication attempts")
+  );
+}
+
+function gatewayErrorRequestsReconnectPause(error?: GatewayErrorShape) {
+  return Boolean(error?.details?.pauseReconnect || gatewayErrorIsAuthPause(error));
 }
 
 function makeTransportCloseEvent(reason = "") {
@@ -970,6 +1067,7 @@ export class GatewayDirectTransport extends EventTarget {
   private connectedNodeId = "";
   private nodeInvokeNodeIds = new Map<string, string>();
   private nodeSessionOpen = false;
+  private operatorSessionOpen = false;
   private gatewayClientId: GatewayClientId = "openclaw-even-g2-node";
   private triedLegacyClientId = false;
   private nodeApprovalPollTimer: ReturnType<typeof setTimeout> | null = null;
@@ -1052,6 +1150,7 @@ export class GatewayDirectTransport extends EventTarget {
     if (this.readyState === WebSocket.CLOSED) return;
     this.readyState = WebSocket.CLOSED;
     this.nodeSessionOpen = false;
+    this.operatorSessionOpen = false;
     this.clearNodeApprovalPoll();
     const voice = this.voiceTransport;
     const nodeSession = this.nodeSession;
@@ -1085,8 +1184,9 @@ export class GatewayDirectTransport extends EventTarget {
       config,
       getSessionKey: () => this.selectedSessionKey,
       request: async (method, params, timeoutMs) => {
-        if (!this.operatorSession) throw new Error("operator session is not connected");
-        return this.operatorSession.request(method, params, timeoutMs);
+        const session = this.openOperatorSession();
+        if (!session) throw new Error("operator session is not connected");
+        return session.request(method, params, timeoutMs);
       },
       onClose: () => {
         if (this.voiceTransport === voice) this.voiceTransport = null;
@@ -1097,11 +1197,20 @@ export class GatewayDirectTransport extends EventTarget {
   }
 
   request<T = unknown>(method: string, params?: unknown, timeoutMs?: number): Promise<T> {
-    if (!this.operatorSession) return Promise.reject(new Error("operator session is not connected"));
-    return this.operatorSession.request<T>(method, params, timeoutMs);
+    const session = this.openOperatorSession();
+    if (!session) return Promise.reject(new Error("operator session is not connected"));
+    return session.request<T>(method, params, timeoutMs);
+  }
+
+  retryOperatorApproval() {
+    if (this.readyState === WebSocket.CLOSED || !this.nodeSessionOpen || this.operatorSession) return false;
+    this.connectOperator();
+    return true;
   }
 
   private connectOperator() {
+    this.operatorSessionOpen = false;
+    if (this.readyState !== WebSocket.CLOSED) this.readyState = WebSocket.CONNECTING;
     const session = new GatewayWsSession({
       url: this.setup.url,
       token: this.options.token,
@@ -1125,6 +1234,7 @@ export class GatewayDirectTransport extends EventTarget {
         const defaults = asObject(snapshot?.sessionDefaults);
         const mainSessionKey = asString(defaults?.mainSessionKey);
         if (!this.selectedSessionKey) this.selectedSessionKey = mainSessionKey || FALLBACK_MAIN_SESSION_KEY;
+        this.operatorSessionOpen = true;
         this.readyState = WebSocket.OPEN;
         this.dispatchEvent(new Event("open"));
         this.emit({ type: "ready", service: "openclaw-gateway-direct" });
@@ -1152,29 +1262,33 @@ export class GatewayDirectTransport extends EventTarget {
     });
   }
 
+  private openOperatorSession() {
+    return this.operatorSessionOpen ? this.operatorSession : null;
+  }
+
   private async handleAppCommand(msg: DirectAppCommand) {
     try {
       switch (msg.type) {
         case "eveng2.session.config.get":
-          if (!this.operatorSession) return;
+          if (!this.openOperatorSession()) return;
           this.emit({ type: "eveng2.session.config.snapshot", sessionKey: this.selectedSessionKey });
           return;
         case "eveng2.session.list":
-          if (!this.operatorSession) return;
+          if (!this.openOperatorSession()) return;
           await this.refreshSessions();
           return;
         case "eveng2.session.transcript.get":
-          if (!this.operatorSession) return;
+          if (!this.openOperatorSession()) return;
           await this.refreshTranscript(msg.sessionKey || this.selectedSessionKey, msg.limit);
           return;
         case "eveng2.session.switch":
-          if (!this.operatorSession) return;
+          if (!this.openOperatorSession()) return;
           if (msg.sessionKey) this.selectedSessionKey = msg.sessionKey;
           this.emit({ type: "eveng2.session.switch.applied", sessionKey: this.selectedSessionKey });
           await this.refreshTranscript(this.selectedSessionKey);
           return;
         case "eveng2.session.create":
-          if (!this.operatorSession) return;
+          if (!this.openOperatorSession()) return;
           try {
             await this.createSession(msg.label);
           } catch (error) {
@@ -1185,7 +1299,7 @@ export class GatewayDirectTransport extends EventTarget {
           }
           return;
         case "eveng2.session.send":
-          if (!this.operatorSession) return;
+          if (!this.openOperatorSession()) return;
           await this.sendSessionMessage(msg);
           return;
         case "eveng2.node.command.result":
@@ -1209,12 +1323,15 @@ export class GatewayDirectTransport extends EventTarget {
           }
           return;
         case "eveng2.node.approval.refresh":
-          if (!this.operatorSession) return;
+          if (!this.openOperatorSession()) return;
           await this.refreshNodeApprovalStatus();
           return;
         case "eveng2.approval.resolve":
-          if (!this.operatorSession) return;
-          await this.operatorSession.request("exec.approval.resolve", { id: msg.id || msg.requestId, decision: msg.decision });
+          {
+            const session = this.openOperatorSession();
+            if (!session) return;
+            await session.request("exec.approval.resolve", { id: msg.id || msg.requestId, decision: msg.decision });
+          }
           this.emit({ type: "eveng2.approval.resolve.ack", id: msg.id, requestId: msg.requestId, decision: msg.decision, status: "accepted" });
           return;
       }
@@ -1224,7 +1341,7 @@ export class GatewayDirectTransport extends EventTarget {
   }
 
   private async refreshSessions() {
-    const payload = await this.operatorSession?.request("sessions.list", {
+    const payload = await this.openOperatorSession()?.request("sessions.list", {
       includeGlobal: true,
       includeUnknown: false,
       configuredAgentsOnly: true,
@@ -1263,7 +1380,7 @@ export class GatewayDirectTransport extends EventTarget {
   private async refreshTranscript(sessionKey: string, limit = DEFAULT_TRANSCRIPT_RAW_LIMIT) {
     const safeLimit = Math.max(1, Math.floor(limit));
     try {
-      const payload = await this.operatorSession?.request("chat.history", { sessionKey, limit: safeLimit, maxChars: transcriptMaxCharsForLimit(safeLimit) });
+      const payload = await this.openOperatorSession()?.request("chat.history", { sessionKey, limit: safeLimit, maxChars: transcriptMaxCharsForLimit(safeLimit) });
       const root = asObject(payload);
       const messages = (Array.isArray(root?.messages) ? root.messages : []).map((message) => asObject(message)).filter((message): message is Record<string, unknown> => Boolean(message)).map((message) => ({
         id: asString(message.id) || asString(message.messageId),
@@ -1297,7 +1414,7 @@ export class GatewayDirectTransport extends EventTarget {
   }
 
   private async createSession(label = "Even G2") {
-    const payload = await this.operatorSession?.request("sessions.create", {
+    const payload = await this.openOperatorSession()?.request("sessions.create", {
       parentSessionKey: this.selectedSessionKey,
       label,
     });
@@ -1315,7 +1432,7 @@ export class GatewayDirectTransport extends EventTarget {
       this.emit({ type: "error", error: "session message is empty" });
       return;
     }
-    await this.operatorSession?.request("chat.send", {
+    await this.openOperatorSession()?.request("chat.send", {
       sessionKey,
       message,
       ...(msg.idempotencyKey ? { idempotencyKey: msg.idempotencyKey } : {}),
@@ -1398,9 +1515,10 @@ export class GatewayDirectTransport extends EventTarget {
   }
 
   private async refreshNodeApprovalStatus() {
-    if (!this.operatorSession) return;
+    const session = this.openOperatorSession();
+    if (!session) return;
     try {
-      const payload = await this.operatorSession.request("node.list", {}, 5000);
+      const payload = await session.request("node.list", {}, 5000);
       const nodes = nodeCatalogRows(payload);
       const candidates = nodes.filter((node) => looksLikeEvenG2Node(node));
       const allSourcePendingCandidates = nodes.filter((node) => isPendingCatalogSource(node));
@@ -1449,7 +1567,7 @@ export class GatewayDirectTransport extends EventTarget {
       // Bounded operator tokens or older Gateways may not expose node catalog
       // reads. Connection and voice can still work, so keep this diagnostic-only.
     } finally {
-      if (this.readyState !== WebSocket.CLOSED && this.operatorSession) {
+      if (this.readyState !== WebSocket.CLOSED && this.openOperatorSession()) {
         this.scheduleNodeApprovalPoll(this.nodeApprovalPending ? 2500 : 15000);
       }
     }
@@ -1477,7 +1595,7 @@ export class GatewayDirectTransport extends EventTarget {
       type: "error",
       error: error.message,
       ...(requestId ? { requestId } : {}),
-      ...(gatewayError?.details?.pauseReconnect ? { pauseReconnect: true } : {}),
+      ...(gatewayErrorRequestsReconnectPause(gatewayError) ? { pauseReconnect: true } : {}),
     });
   }
 
@@ -1486,7 +1604,9 @@ export class GatewayDirectTransport extends EventTarget {
     if (this.nodeSessionOpen) {
       const gatewayError = gatewayErrorFromConnectError(error);
       const requestId = requestIdFromGatewayError(gatewayError);
-      const pauseReconnect = Boolean(gatewayError?.details?.pauseReconnect) || shouldPauseOperatorReconnect(error.message);
+      const pauseReconnect = gatewayErrorRequestsReconnectPause(gatewayError) || shouldPauseOperatorReconnect(error.message);
+      if (this.readyState !== WebSocket.CLOSED) this.readyState = WebSocket.CONNECTING;
+      this.operatorSessionOpen = false;
       this.operatorSession = null;
       session.close();
       this.emit({
@@ -1505,6 +1625,8 @@ export class GatewayDirectTransport extends EventTarget {
     if (this.operatorSession !== session) return;
     const reason = closeReasonFromEvent(event);
     if (this.nodeSessionOpen) {
+      if (this.readyState !== WebSocket.CLOSED) this.readyState = WebSocket.CONNECTING;
+      this.operatorSessionOpen = false;
       this.operatorSession = null;
       const pauseReconnect = shouldPauseOperatorReconnect(reason);
       if (reason) {

@@ -90,6 +90,8 @@ export type IsolatedGatewayPlan = {
   approvalCommand: string[];
   e2eAgentArgs: string[];
   e2eAgentEnv: Record<string, string>;
+  e2eOnboardingArgs: string[];
+  e2eOnboardingEnv: Record<string, string>;
   configTemplatePath: string;
   hostGatewayUrl: string;
   hostPort: number;
@@ -769,6 +771,12 @@ export function buildGatewayPlan(args: ParsedArgs): IsolatedGatewayPlan {
     "--openclaw-token",
     args.token,
   ];
+  const e2eOnboardingArgs = [
+    "--openclaw-container",
+    args.containerName,
+    "--gateway-url",
+    hostGatewayUrl,
+  ];
   return {
     config,
     configPath,
@@ -796,6 +804,11 @@ export function buildGatewayPlan(args: ParsedArgs): IsolatedGatewayPlan {
       EVENG2_E2E_OPENCLAW_CONTAINER: args.containerName,
       EVENG2_E2E_OPENCLAW_TOKEN: args.token,
       EVENG2_E2E_OPENCLAW_URL: containerGatewayUrl,
+    },
+    e2eOnboardingArgs,
+    e2eOnboardingEnv: {
+      EVENG2_E2E_GATEWAY_URL: hostGatewayUrl,
+      EVENG2_E2E_OPENCLAW_CONTAINER: args.containerName,
     },
     hostGatewayUrl,
     hostPort: args.hostPort,
@@ -858,6 +871,7 @@ function planSummary(plan: IsolatedGatewayPlan) {
     dockerRunArgsRedacted: redactCommand(["docker", ...plan.dockerRunArgs]),
     approvalCommand: plan.approvalCommand,
     e2eAgentCommand: ["pnpm", "e2e:agent:live", "--", ...plan.e2eAgentArgs],
+    e2eOnboardingCommand: ["pnpm", "e2e:agent:onboarding", "--", ...plan.e2eOnboardingArgs],
     simulatorUrl: `http://127.0.0.1:5174/?resetPairing=1&e2eLog=1&setupCode=<setup-code>`,
   };
 }
