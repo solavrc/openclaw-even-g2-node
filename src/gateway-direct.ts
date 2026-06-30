@@ -678,7 +678,11 @@ export class GatewayWsSession {
       normalized.includes("token") ||
       normalized.includes("not approved") ||
       normalized.includes("approval") ||
-      normalized.includes("pairing")
+      normalized.includes("pairing") ||
+      normalized.includes("higher role") ||
+      normalized.includes("role-upgrade") ||
+      normalized.includes("role upgrade") ||
+      normalized.includes("scope upgrade")
     );
   }
 

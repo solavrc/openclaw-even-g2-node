@@ -23,6 +23,8 @@ export type AgentCommandEvidence = {
   exitCode: number | null;
   json: unknown[];
   ok: boolean;
+  rawJson?: unknown[];
+  rawStdout?: string;
   stderr: string;
   stdout: string;
   timedOut: boolean;
@@ -256,7 +258,7 @@ function sameGatewayUrl(candidate: URL, target: URL) {
 function gatewayUrlTargets(gatewayUrl: string) {
   const urls: URL[] = [];
   const seen = new Set<string>();
-  for (const value of [gatewayUrl, redactText(gatewayUrl)].map(normalizeRedactedUrlPlaceholders)) {
+  for (const value of [gatewayUrl].map(normalizeRedactedUrlPlaceholders)) {
     try {
       const url = new URL(value);
       url.hash = "";
@@ -396,13 +398,17 @@ function runAgentCommand(args: ParsedArgs): AgentCommandEvidence {
     stdio: ["ignore", "pipe", "pipe"],
     timeout: (args.timeoutSeconds + 5) * 1_000,
   });
-  const stdout = redactText(result.stdout || "");
+  const rawStdout = result.stdout || "";
+  const rawJson = parseAgentJsonOutput(rawStdout);
+  const stdout = redactText(rawStdout);
   const stderr = redactText(result.stderr || result.error?.message || "");
   return {
     args: redactCommandArgs(["openclaw", ...commandArgs]),
     exitCode: result.status,
     json: parseAgentJsonOutput(stdout),
     ok: result.status === 0,
+    rawJson,
+    rawStdout,
     stderr,
     stdout,
     timedOut: Boolean(result.error && "code" in result.error && result.error.code === "ETIMEDOUT"),
@@ -466,8 +472,9 @@ async function main() {
   fs.mkdirSync(args.outDir, { recursive: true });
 
   const command = runAgentCommand(args);
-  const responseText = extractAgentResponseText(command.stdout, command.json);
-  const verdict = agentOnboardingVerdict(command, responseText, {
+  const rawResponseText = extractAgentResponseText(command.rawStdout ?? command.stdout, command.rawJson ?? command.json);
+  const responseText = redactText(rawResponseText);
+  const verdict = agentOnboardingVerdict(command, rawResponseText, {
     gatewayUrl: args.gatewayUrl,
     promptText: args.message,
   });

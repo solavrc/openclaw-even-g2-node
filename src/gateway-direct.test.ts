@@ -676,6 +676,50 @@ describe("Gateway session events", () => {
     expect(authStore.load(identity.deviceId, "node", "wss://gateway.example.test")).toBeNull();
   });
 
+  it("falls back to setup bootstrap when stored operator tokens need a role upgrade", async () => {
+    vi.spyOn(Date, "now").mockReturnValue(1700000000000);
+    const storage = new MemoryStorage();
+    const authStore = new BrowserDeviceAuthStore(storage);
+    authStore.save(identity.deviceId, "operator", "stored-operator-token", ["operator.read"], "wss://gateway.example.test");
+    const session = new GatewayWsSession({
+      url: "wss://gateway.example.test",
+      bootstrapToken: "fresh-bootstrap",
+      role: "operator",
+      scopes: ["operator.approvals", "operator.read", "operator.write"],
+      caps: [],
+      commands: [],
+      client: buildEvenG2ClientInfo("ui", "inst-1"),
+      userAgent: "test",
+      WebSocketCtor: FakeGatewayWebSocketCtor,
+      identityStore: {
+        loadOrCreate: async () => identity,
+        sign: async (payload: string) => `sig:${payload}`,
+      },
+      authStore,
+    });
+
+    await session.connect();
+    const ws = FakeGatewayWebSocket.instances[0]!;
+    ws.receive({ type: "event", event: "connect.challenge", payload: { nonce: "nonce-1" } });
+    await vi.waitFor(() => expect(lastConnectParams(ws).params?.auth).toEqual({ token: "stored-operator-token" }));
+
+    ws.receive({
+      type: "res",
+      id: "__connect__",
+      ok: false,
+      error: {
+        code: "unauthorized",
+        message: "higher role than currently approved",
+      },
+    });
+
+    await vi.waitFor(() => {
+      expect(ws.sent.filter((item) => item.includes("\"method\":\"connect\""))).toHaveLength(2);
+    });
+    expect(lastConnectParams(ws).params?.auth).toEqual({ bootstrapToken: "fresh-bootstrap" });
+    expect(authStore.load(identity.deviceId, "operator", "wss://gateway.example.test")).toBeNull();
+  });
+
   it("ignores late node-open callbacks after the direct transport closes", async () => {
     vi.spyOn(Date, "now").mockReturnValue(1700000000000);
     const messages: Array<Record<string, unknown>> = [];

@@ -182,14 +182,24 @@ describe("e2e onboarding agent smoke helpers", () => {
     expect(detail).not.toContain("secret-token");
   });
 
-  it("accepts redacted secret-bearing Gateway URLs when checking preservation", () => {
+  it("requires exact secret-bearing Gateway URLs when checking preservation", () => {
     const gatewayUrl = "wss://user:secret-pass@gateway.example.test/OpenClaw/ws?token=secret-token";
-    const response = "OpenClaw displayed the Even G2 setup QR for wss://user:<redacted>@gateway.example.test/OpenClaw/ws?token=<redacted>. Scan the setup code from the phone.";
+    const response = "OpenClaw displayed the Even G2 setup QR for wss://user:secret-pass@gateway.example.test/OpenClaw/ws?token=secret-token. Scan the setup code from the phone.";
+    const wrongSecretResponse = "OpenClaw displayed the Even G2 setup QR for wss://user:wrong-pass@gateway.example.test/OpenClaw/ws?token=wrong-token. Scan the setup code from the phone.";
+    const redactedResponse = "OpenClaw displayed the Even G2 setup QR for wss://user:<redacted>@gateway.example.test/OpenClaw/ws?token=<redacted>. Scan the setup code from the phone.";
 
     expect(agentOnboardingVerdict({ ...okCommand, stdout: response }, response, {
       gatewayUrl,
       promptText: setupOpenClawAskRequest(gatewayUrl),
     }).ok).toBe(true);
+    expect(agentOnboardingVerdict({ ...okCommand, stdout: wrongSecretResponse }, wrongSecretResponse, {
+      gatewayUrl,
+      promptText: setupOpenClawAskRequest(gatewayUrl),
+    }).ok).toBe(false);
+    expect(agentOnboardingVerdict({ ...okCommand, stdout: redactedResponse }, redactedResponse, {
+      gatewayUrl,
+      promptText: setupOpenClawAskRequest(gatewayUrl),
+    }).ok).toBe(false);
   });
 
   it("allows the requested 172.x Gateway URL while rejecting other bridge URLs", () => {
