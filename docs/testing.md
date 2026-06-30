@@ -125,9 +125,11 @@ Force a mode when needed:
 ```bash
 EVENG2_SIM_FLOW=setup pnpm sim:e2e
 EVENG2_SIM_FLOW=session pnpm sim:e2e
+EVENG2_SIM_FLOW=sessionSelector pnpm sim:e2e
 EVENG2_SIM_FLOW=voiceReview pnpm sim:e2e
 EVENG2_SIM_FLOW=sendNow pnpm sim:e2e
 EVENG2_SIM_FLOW=canvas pnpm sim:e2e
+EVENG2_SIM_FLOW=canvasTutorial pnpm sim:e2e
 EVENG2_SIM_FLOW=approval pnpm sim:e2e
 EVENG2_SIM_FLOW=recovery pnpm sim:e2e
 ```
@@ -223,8 +225,8 @@ the marker is not direct-mode evidence. This proves the app/Gateway path reached
 the `chat.send` WAV attachment acknowledgement; the selected Agent's later
 media understanding is still OpenClaw-owned behavior.
 
-To run the setup smoke and every dev-only fixture without manually switching
-simulator URLs:
+To run the setup smoke, Story 3 phone selector smoke, and every dev-only
+fixture without manually switching simulator URLs:
 
 ```bash
 pnpm sim:fixtures
@@ -232,10 +234,11 @@ pnpm sim:fixtures
 
 `sim:fixtures` starts and stops the required local app servers and Even Hub
 simulator processes. It builds the app first, then covers setup, session
-navigation, review-before-send, Send now, canvas, approval, and recovery fixture HUDs. For
-interactive fixture states it also drives representative glasses input events:
-session `up`/`down`, Review `tap send`, canvas `tap hide`, approval rerender and
-`tap allow`, tutorial skip, and Send now cancellation. It writes
+navigation, phone Session selector switching, review-before-send, Send now,
+canvas, approval, and recovery fixture HUDs. For interactive fixture states it
+also drives representative input events: session `up`/`down`, phone selector
+focus/mousedown/change, Review `tap send`, canvas `tap hide`, approval rerender
+and `tap allow`, tutorial skip, and Send now cancellation. It writes
 `.openclaw-even-g2-node/simulator-fixtures-report.json` for local debugging. The
 report is written on both pass and failure and is Git-ignored. Treat it as
 optional visual-smoke context, not release evidence: app permissions, packaged
@@ -321,10 +324,13 @@ pnpm e2e:agent:review:validate -- .openclaw-even-g2-node/e2e-agent-runs/<run-id>
 ```
 
 The validator requires exactly one review for each `story-1` through `story-8`,
-confidence values from `0` to `1`, string arrays for evidence/concerns/fixes,
-and one of `pass`, `warn`, `fail`, or `inconclusive` for every verdict. Use
-`warn` when observed behavior looks aligned but the evidence scope is incomplete;
-reserve `fail` for observed behavior that contradicts `docs/user-stories.md`.
+exactly one coverage entry for each numbered substory such as `story-1.1` and
+`story-8.8`, confidence values from `0` to `1`, string arrays for
+evidence/concerns/fixes, and one of `pass`, `warn`, `fail`, or `inconclusive`
+for every verdict. Coverage entries use `observed`, `partial`, `unobserved`, or
+`not-applicable`. Use `warn` when observed behavior looks aligned but the
+evidence scope is incomplete; reserve `fail` for observed behavior that
+contradicts `docs/user-stories.md`.
 
 There is also a manual GitHub Actions workflow, `Simulator Fixtures`, that runs
 the same command under `xvfb-run` and uploads the fixture report plus captured
