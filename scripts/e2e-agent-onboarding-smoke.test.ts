@@ -123,4 +123,43 @@ describe("e2e onboarding agent smoke helpers", () => {
       promptText: setupOpenClawAskRequest(gatewayUrl),
     }).ok).toBe(false);
   });
+
+  it("accepts root-path Gateway query URLs without forcing a slash before the query", () => {
+    const gatewayUrl = "wss://gateway.example.test?tenant=alpha";
+    const response = "OpenClaw displayed the Even G2 setup QR for wss://gateway.example.test?tenant=alpha. Scan the setup code from the phone.";
+
+    expect(agentOnboardingVerdict({ ...okCommand, stdout: response }, response, {
+      gatewayUrl,
+      promptText: setupOpenClawAskRequest(gatewayUrl),
+    }).ok).toBe(true);
+  });
+
+  it("compares Gateway URL path and query case-sensitively while allowing host case differences", () => {
+    const gatewayUrl = "wss://gateway.example.test/OpenClaw/ws?tenant=Alpha";
+    const hostCaseResponse = "OpenClaw displayed the Even G2 setup QR for WSS://GATEWAY.EXAMPLE.TEST/OpenClaw/ws?tenant=Alpha. Scan the setup code from the phone.";
+    const pathCaseResponse = "OpenClaw displayed the Even G2 setup QR for wss://gateway.example.test/openclaw/ws?tenant=alpha. Scan the setup code from the phone.";
+
+    expect(agentOnboardingVerdict({ ...okCommand, stdout: hostCaseResponse }, hostCaseResponse, {
+      gatewayUrl,
+      promptText: setupOpenClawAskRequest(gatewayUrl),
+    }).ok).toBe(true);
+    expect(agentOnboardingVerdict({ ...okCommand, stdout: pathCaseResponse }, pathCaseResponse, {
+      gatewayUrl,
+      promptText: setupOpenClawAskRequest(gatewayUrl),
+    }).ok).toBe(false);
+  });
+
+  it("redacts secret-bearing Gateway URLs in onboarding check details", () => {
+    const gatewayUrl = "wss://gateway.example.test/openclaw?token=secret-token";
+    const response = "OpenClaw displayed the Even G2 setup QR for wss://gateway.example.test/openclaw. Scan the setup code from the phone.";
+
+    const verdict = agentOnboardingVerdict({ ...okCommand, stdout: response }, response, {
+      gatewayUrl,
+      promptText: setupOpenClawAskRequest(gatewayUrl),
+    });
+    const detail = verdict.checks.find((check) => check.name === "host-gateway-url")?.detail || "";
+
+    expect(detail).toContain("token=<redacted>");
+    expect(detail).not.toContain("secret-token");
+  });
 });

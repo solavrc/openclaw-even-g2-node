@@ -227,23 +227,44 @@ function looksLikePromptEcho(responseText: string, promptText = setupOpenClawAsk
   return withoutCommonPrefix === prompt;
 }
 
+function trimUrlCandidate(value: string) {
+  return value.replace(/[),.;]+$/g, "");
+}
+
+function urlCandidatesFromText(value: string) {
+  return (value.match(/\bwss?:\/\/[^\s"'<>`]+/gi) || []).map(trimUrlCandidate);
+}
+
+function sameGatewayUrl(candidate: URL, target: URL) {
+  return candidate.protocol.toLowerCase() === target.protocol.toLowerCase() &&
+    candidate.hostname.toLowerCase() === target.hostname.toLowerCase() &&
+    candidate.port === target.port &&
+    candidate.username === target.username &&
+    candidate.password === target.password &&
+    candidate.pathname === target.pathname &&
+    candidate.search === target.search;
+}
+
 function includesGatewayTarget(responseText: string, gatewayUrl: string) {
   const trimmed = gatewayUrl.trim();
   if (!trimmed) return true;
-  const target = (() => {
+  let target: URL;
+  try {
+    target = new URL(trimmed);
+    target.hash = "";
+  } catch {
+    return responseText.includes(trimmed);
+  }
+  for (const candidateText of urlCandidatesFromText(responseText)) {
     try {
-      const parsed = new URL(trimmed);
-      parsed.hash = "";
-      return parsed.toString().toLowerCase();
+      const candidate = new URL(candidateText);
+      candidate.hash = "";
+      if (sameGatewayUrl(candidate, target)) return true;
     } catch {
-      return trimmed.toLowerCase();
+      // Ignore non-URL text that matched the loose URL pattern.
     }
-  })();
-  if (!target) return true;
-  const normalized = responseText.toLowerCase();
-  if (normalized.includes(target)) return true;
-  const rootPathTarget = target.endsWith("/") && !target.includes("?") ? target.slice(0, -1) : "";
-  return Boolean(rootPathTarget && normalized.includes(rootPathTarget));
+  }
+  return false;
 }
 
 function containsContainerBridgeAddress(responseText: string) {
@@ -293,7 +314,7 @@ export function agentOnboardingVerdict(
         {
           name: "host-gateway-url",
           ok: includesGatewayTarget(responseText, gatewayUrl),
-          detail: `response should preserve the host-reachable Gateway URL ${gatewayUrl}`,
+          detail: `response should preserve the host-reachable Gateway URL ${redactText(gatewayUrl)}`,
         },
         {
           name: "no-container-bridge-url",
