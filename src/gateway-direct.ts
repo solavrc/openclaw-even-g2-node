@@ -2049,9 +2049,13 @@ export class GatewayDirectVoiceTransport extends EventTarget {
     const closeDrainUntil = Date.now() + TALK_RELAY_CLOSE_DRAIN_MS;
     while (Date.now() < deadline && !this.closed) {
       const text = this.combinedTalkTranscript({ includePartial: true }).trim();
+      const hasFinalText = this.talkFinalSegments.some((segment) => segment.text.trim());
+      const hasPartialText = Boolean(this.talkPartialText.trim());
       const quietForMs = Date.now() - this.talkLastTranscriptEventAtMs;
       if (
         text
+        && hasFinalText
+        && !hasPartialText
         && Date.now() >= closeDrainUntil
         && (!this.talkLastTranscriptEventAtMs || quietForMs >= TALK_RELAY_FINAL_QUIET_MS)
       ) {
@@ -2072,15 +2076,6 @@ export class GatewayDirectVoiceTransport extends EventTarget {
         return;
       }
       this.talkFinalSegments.push({ key, text: normalized });
-      return;
-    }
-    const finalized = this.combinedTalkTranscript();
-    if (!finalized) {
-      this.talkFinalSegments.push({ text: normalized });
-      return;
-    }
-    if (normalized.length > finalized.length && normalized.startsWith(finalized)) {
-      this.talkFinalSegments.splice(0, this.talkFinalSegments.length, { text: normalized });
       return;
     }
     this.talkFinalSegments.push({ text: normalized });

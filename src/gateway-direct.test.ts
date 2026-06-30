@@ -2542,6 +2542,78 @@ describe("Gateway direct voice", () => {
     });
   });
 
+  it("preserves unkeyed Talk transcript finals that share a prefix", () => {
+    const voice = new GatewayDirectVoiceTransport({
+      gateway: {} as never,
+      config: {
+        transcriptionMode: "talk-relay",
+        sessionKey: "agent:main:main",
+        targetSessionKey: "agent:main:main",
+        idempotencyKey: "voice-talk-prefix-unkeyed",
+        format: {
+          encoding: "pcm_s16le",
+          sampleRateHz: 16000,
+          channels: 1,
+        },
+      },
+      getSessionKey: () => "agent:main:main",
+      request: async () => ({}),
+      onClose: () => undefined,
+    });
+    const messages: Array<Record<string, unknown>> = [];
+    voice.addEventListener("message", (event) => {
+      messages.push(JSON.parse((event as MessageEvent).data as string) as Record<string, unknown>);
+    });
+
+    voice.handleTalkEvent({ type: "transcript.done", sessionId: "talk-prefix-1", text: "はい" });
+    voice.handleTalkEvent({ type: "transcript.done", sessionId: "talk-prefix-1", text: "はい、お願いします" });
+
+    expect(messages.at(-1)).toMatchObject({
+      type: "transcript.final",
+      text: "はい はい、お願いします",
+    });
+  });
+
+  it("uses partial-only Talk transcript text only as a timeout fallback", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(5000);
+    const voice = new GatewayDirectVoiceTransport({
+      gateway: {} as never,
+      config: {
+        transcriptionMode: "talk-relay",
+        sessionKey: "agent:main:main",
+        targetSessionKey: "agent:main:main",
+        idempotencyKey: "voice-talk-partial-timeout",
+        draftTimeoutMs: 3000,
+        format: {
+          encoding: "pcm_s16le",
+          sampleRateHz: 16000,
+          channels: 1,
+        },
+      },
+      getSessionKey: () => "agent:main:main",
+      request: async () => ({}),
+      onClose: () => undefined,
+    });
+    const waitForTalkFinalText = Reflect.get(voice, "waitForTalkFinalText");
+    if (typeof waitForTalkFinalText !== "function") {
+      throw new Error("GatewayDirectVoiceTransport.waitForTalkFinalText is unavailable");
+    }
+    Reflect.set(voice, "talkPartialText", "暫定 transcript");
+    Reflect.set(voice, "talkLastTranscriptEventAtMs", Date.now());
+
+    let settledText = "";
+    const waitPromise = (waitForTalkFinalText.call(voice) as Promise<string>).then((text) => {
+      settledText = text;
+      return text;
+    });
+    await vi.advanceTimersByTimeAsync(2200);
+    expect(settledText).toBe("");
+    await vi.advanceTimersByTimeAsync(1000);
+
+    await expect(waitPromise).resolves.toBe("暫定 transcript");
+  });
+
   it("drains Talk transcript events after a slow close response", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(2000);
