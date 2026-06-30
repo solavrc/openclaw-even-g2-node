@@ -6,6 +6,8 @@ describe("isSimulatorSourcePath", () => {
     expect(isSimulatorSourcePath("src/main.tsx")).toBe(true);
     expect(isSimulatorSourcePath("src/glass.ts")).toBe(true);
     expect(isSimulatorSourcePath("app.json")).toBe(true);
+    expect(isSimulatorSourcePath("docs/testing.md")).toBe(true);
+    expect(isSimulatorSourcePath("docs/user-stories.md")).toBe(true);
     expect(isSimulatorSourcePath("scripts/evenhub-simulator-e2e.ts")).toBe(true);
   });
 
@@ -16,6 +18,6 @@ describe("isSimulatorSourcePath", () => {
   });
 
   it("does not treat unrelated docs as simulator source", () => {
-    expect(isSimulatorSourcePath("docs/testing.md")).toBe(false);
+    expect(isSimulatorSourcePath("docs/architecture.md")).toBe(false);
   });
 });

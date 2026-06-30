@@ -1,0 +1,124 @@
+{
+  "env": {
+    "shellEnv": {
+      "enabled": false
+    },
+    "vars": {}
+  },
+  "gateway": {
+    "mode": "local",
+    "bind": "lan",
+    "port": 19001,
+    "auth": {
+      "mode": "token",
+      "token": {
+        "source": "env",
+        "provider": "openclaw",
+        "id": "OPENCLAW_GATEWAY_TOKEN"
+      }
+    },
+    "controlUi": {
+      "enabled": false,
+      "allowedOrigins": [
+        "http://127.0.0.1:5174",
+        "http://localhost:5174",
+        "http://127.0.0.1:35162",
+        "http://localhost:35162"
+      ]
+    }
+  },
+  "plugins": {
+    "enabled": true,
+    "entries": {
+      "codex": {
+        "enabled": true
+      },
+      "voice-call": {
+        "enabled": true,
+        "config": {
+          "streaming": {
+            "enabled": true,
+            "provider": "xai",
+            "providers": {
+              "xai": {}
+            }
+          }
+        }
+      },
+      "xai": {
+        "enabled": true
+      }
+    }
+  },
+  "agents": {
+    "defaults": {
+      "workspace": "/home/node/.openclaw/workspace",
+      "userTimezone": "Asia/Tokyo",
+      "model": {
+        "primary": "openai/gpt-5.5",
+        "fallbacks": []
+      },
+      "models": {
+        "openai/gpt-5.5": {
+          "agentRuntime": {
+            "id": "codex"
+          }
+        }
+      }
+    },
+    "list": [
+      {
+        "id": "main",
+        "default": true,
+        "workspace": "/home/node/.openclaw/workspace",
+        "model": {
+          "primary": "openai/gpt-5.5",
+          "fallbacks": []
+        },
+        "models": {
+          "openai/gpt-5.5": {
+            "agentRuntime": {
+              "id": "codex"
+            }
+          }
+        }
+      }
+    ]
+  },
+  "tools": {
+    "profile": "minimal",
+    "media": {
+      "audio": {
+        "enabled": true,
+        "language": "ja",
+        "models": [
+          {
+            "type": "cli",
+            "command": "whisper",
+            "args": [
+              "{{MediaPath}}",
+              "--model",
+              "base",
+              "--language",
+              "ja",
+              "--task",
+              "transcribe",
+              "--output_format",
+              "txt",
+              "--output_dir",
+              "/tmp",
+              "--verbose",
+              "False",
+              "--condition_on_previous_text",
+              "False",
+              "--no_speech_threshold",
+              "0.75"
+            ],
+            "timeoutSeconds": 90
+          }
+        ],
+        "prompt": "Transcribe short Japanese and English Even G2 voice turns near-verbatim. Preserve OpenClaw session names, commands, product names, and code terms. Return only the transcript."
+      }
+    }
+  }
+}

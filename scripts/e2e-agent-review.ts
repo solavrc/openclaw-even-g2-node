@@ -4,7 +4,14 @@ import fs from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { gitMetadata } from "./git-state.ts";
-import { createLlmReviewTemplate, LLM_REVIEW_STORY_IDS, LLM_REVIEW_VERDICTS } from "./llm-review-schema.ts";
+import {
+  coverageIdsFromUserStoriesMarkdown,
+  createLlmReviewTemplate,
+  LLM_REVIEW_COVERAGE_IDS,
+  LLM_REVIEW_COVERAGE_STATUSES,
+  LLM_REVIEW_STORY_IDS,
+  LLM_REVIEW_VERDICTS,
+} from "./llm-review-schema.ts";
 import {
   assertCaptureLooksVisible,
   captureSimulator,
@@ -51,6 +58,7 @@ type OpenClawEvidence = {
   liveCanvas: boolean;
   nodeName: string;
   nodeStatus?: CommandEvidence;
+  resolvedNodeName?: string;
 };
 
 type SimulatorEvidence = {
@@ -88,7 +96,7 @@ Usage:
 Options:
   --out-dir <path>          Output directory. Default: .openclaw-even-g2-node/e2e-agent-runs/<timestamp>
   --simulator-url <url>     Even Hub simulator automation URL. Default: ${DEFAULT_SIMULATOR_URL}
-  --node <name>             OpenClaw node name/id. Default: ${DEFAULT_NODE_NAME}
+  --node <name>             OpenClaw node name/id. Use "auto" to select a connected Even G2 node. Default: ${DEFAULT_NODE_NAME}
   --openclaw-container <n>  OpenClaw container name for all CLI node evidence. Default: EVENG2_E2E_OPENCLAW_CONTAINER
   --openclaw-profile <name> OpenClaw CLI profile for node evidence. Default: EVENG2_E2E_OPENCLAW_PROFILE or current CLI profile
   --openclaw-url <url>      Gateway WebSocket URL for node evidence. Default: EVENG2_E2E_OPENCLAW_URL or OpenClaw CLI config
@@ -180,8 +188,23 @@ export function parseArgs(argv: string[], now = new Date()): ParsedArgs {
   return args;
 }
 
+function looksLikeSetupCodePayload(value: string) {
+  if (!/^[A-Za-z0-9_-]{40,}={0,2}$/.test(value)) return false;
+  try {
+    const decoded = Buffer.from(value, "base64url").toString("utf8");
+    const parsed = JSON.parse(decoded) as unknown;
+    if (!parsed || typeof parsed !== "object") return false;
+    return /bootstrap|setup|token|url/i.test(JSON.stringify(parsed));
+  } catch {
+    return false;
+  }
+}
+
 export function redactText(value: string) {
-  return value
+  const setupCodeRedacted = value.replace(/\b[A-Za-z0-9_-]{40,}={0,2}\b/g, (match) => (
+    looksLikeSetupCodePayload(match) ? "<redacted-setup-code>" : match
+  ));
+  return setupCodeRedacted
     .replace(/("(?:token|secret|authorization|apiKey|api_key|auth|bootstrap|bootstrapToken|bootstrap_token|setup|setupCode|setup_code|setupToken|setup_token)"\s*:\s*")[^"]*(")/gi, "$1<redacted>$2")
     .replace(/(Bearer\s+)[A-Za-z0-9._~+/=-]+/gi, "$1<redacted>")
     .replace(/(--(?:token|openclaw-token|password|api-key|apiKey)\s+)[^\s"']+/gi, "$1<redacted>")
@@ -286,12 +309,12 @@ export function redactCommandArgs(args: string[]) {
   });
 }
 
-function openClawInvokeArgs(args: ParsedArgs, command: string, params: unknown, timeoutMs: number) {
+function openClawInvokeArgs(args: ParsedArgs, nodeName: string, command: string, params: unknown, timeoutMs: number) {
   return [
     "nodes",
     "invoke",
     "--node",
-    args.nodeName,
+    nodeName,
     "--command",
     command,
     "--params",
@@ -363,16 +386,17 @@ function collectOpenClawEvidence(args: ParsedArgs): OpenClawEvidence {
     openClawGatewayArgs(args, ["nodes", "status"]),
     args.openclawTimeoutMs + 1_000,
   );
+  evidence.resolvedNodeName = resolveConnectedNodeName(args.nodeName, evidence.nodeStatus);
   if (args.liveCanvas) {
     evidence.canvasPresent = runOpenClaw(
       args,
-      openClawInvokeArgs(args, "canvas.present", { text: args.canvasText }, args.openclawTimeoutMs),
+      openClawInvokeArgs(args, evidence.resolvedNodeName, "canvas.present", { text: args.canvasText }, args.openclawTimeoutMs),
       args.openclawTimeoutMs + 1_000,
     );
   }
   evidence.canvasSnapshot = runOpenClaw(
     args,
-    openClawInvokeArgs(args, "canvas.snapshot", {}, args.openclawTimeoutMs),
+    openClawInvokeArgs(args, evidence.resolvedNodeName, "canvas.snapshot", {}, args.openclawTimeoutMs),
     args.openclawTimeoutMs + 1_000,
   );
   return evidence;
@@ -386,12 +410,70 @@ function commandJsonNodes(command: CommandEvidence | undefined) {
   return Array.isArray(nodes) ? nodes : [];
 }
 
+function readString(value: unknown) {
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : "";
+}
+
+function nodeRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : null;
+}
+
+function stringArray(value: unknown) {
+  return Array.isArray(value)
+    ? value.map((item) => readString(item).toLowerCase()).filter(Boolean)
+    : [];
+}
+
+function hasEvenG2NodeSurface(entry: Record<string, unknown>) {
+  const caps = [
+    ...stringArray(entry.caps),
+    ...stringArray(entry.declaredCaps),
+    ...stringArray(entry.pendingDeclaredCaps),
+  ];
+  const commands = [
+    ...stringArray(entry.commands),
+    ...stringArray(entry.declaredCommands),
+    ...stringArray(entry.pendingDeclaredCommands),
+  ];
+  return (caps.includes("canvas") && caps.includes("talk"))
+    || (commands.some((command) => command.startsWith("canvas.")) && commands.some((command) => command.startsWith("talk.")));
+}
+
+function isEvenG2NodeRecord(entry: Record<string, unknown>) {
+  const displayName = readString(entry.displayName).toLowerCase();
+  const platform = readString(entry.platform).toLowerCase();
+  const clientId = readString(entry.clientId).toLowerCase();
+  const deviceFamily = readString(entry.deviceFamily).toLowerCase();
+  return platform === "even-g2"
+    || clientId === "openclaw-even-g2-node"
+    || displayName.includes("even g2")
+    || (deviceFamily === "glasses" && hasEvenG2NodeSurface(entry));
+}
+
+export function resolveConnectedNodeName(requestedNodeName: string, nodeStatus: CommandEvidence | undefined) {
+  const requested = requestedNodeName.trim();
+  const auto = requested.toLowerCase() === "auto";
+  const nodes = commandJsonNodes(nodeStatus)
+    .map(nodeRecord)
+    .filter((node): node is Record<string, unknown> => Boolean(node));
+  const match = nodes.find((node) => {
+    if (node.connected !== true) return false;
+    if (auto) return isEvenG2NodeRecord(node);
+    return readString(node.nodeId) === requested || readString(node.displayName) === requested;
+  });
+  return readString(match?.nodeId) || requestedNodeName;
+}
+
 export function nodeStatusHasConnectedNode(openclaw: OpenClawEvidence) {
   const nodes = commandJsonNodes(openclaw.nodeStatus);
+  const resolvedNodeName = openclaw.resolvedNodeName || resolveConnectedNodeName(openclaw.nodeName, openclaw.nodeStatus);
   return nodes.some((node) => {
-    if (!node || typeof node !== "object" || Array.isArray(node)) return false;
-    const entry = node as Record<string, unknown>;
-    return entry.connected === true && (entry.displayName === openclaw.nodeName || entry.nodeId === openclaw.nodeName);
+    const entry = nodeRecord(node);
+    if (!entry) return false;
+    if (entry.connected !== true) return false;
+    if (readString(entry.nodeId) === resolvedNodeName || readString(entry.displayName) === resolvedNodeName) return true;
+    if (openclaw.nodeName.toLowerCase() === "auto") return isEvenG2NodeRecord(entry);
+    return readString(entry.nodeId) === openclaw.nodeName || readString(entry.displayName) === openclaw.nodeName;
   });
 }
 
@@ -445,10 +527,12 @@ function deterministicChecks(simulator: SimulatorEvidence, openclaw: OpenClawEvi
 
 export function buildReviewPrompt(input: {
   bundleDir: string;
+  coverageIds?: readonly string[];
   evidencePath: string;
   manifestPath: string;
   userStoriesPath: string;
 }) {
+  const coverageIds = input.coverageIds?.length ? input.coverageIds : LLM_REVIEW_COVERAGE_IDS;
   return `# Even G2 Agentic E2E Review
 
 You are reviewing the current OpenClaw Even G2 node behavior as a Coding Agent.
@@ -472,12 +556,27 @@ Review rules:
 - Use glassStates, sessionStates, voiceStates, and approvalStates as structured
   simulator evidence when present.
 - Mark missing evidence as inconclusive instead of guessing.
+- Review every numbered substory separately in coverageReviews. Mark substories
+  without direct evidence as "unobserved" or "partial"; do not hide gaps behind
+  a broad story-level "pass".
 - If OpenClaw node evidence exists, compare nodes.status / canvas.snapshot with the simulator state.
+
+Required coverage ids:
+
+${coverageIds.map((coverageId) => `- ${coverageId}`).join("\n")}
 
 Return JSON in this shape:
 
 \`\`\`json
 {
+  "coverageReviews": [
+    {
+      "coverageId": "${coverageIds.join(" | ")}",
+      "status": "${LLM_REVIEW_COVERAGE_STATUSES.join(" | ")}",
+      "evidence": [],
+      "concerns": []
+    }
+  ],
   "overallVerdict": "${LLM_REVIEW_VERDICTS.join(" | ")}",
   "summary": "",
   "storyReviews": [
@@ -497,12 +596,13 @@ Return JSON in this shape:
 
 The final file must be valid according to llm-review.schema.md and should be
 saved as llm-review.json in the bundle directory. Include all story ids exactly
-once. Use "warn" for scoped evidence gaps that do not indicate a behavior
-mismatch; use "fail" only when observed behavior contradicts docs/user-stories.md.
+once and every coverage id exactly once. Use "warn" for scoped evidence gaps
+that do not indicate a behavior mismatch; use "fail" only when observed
+behavior contradicts docs/user-stories.md.
 `;
 }
 
-function buildReviewSchemaDoc() {
+function buildReviewSchemaDoc(coverageIds: readonly string[]) {
   return [
     "# LLM Review Schema",
     "",
@@ -510,9 +610,12 @@ function buildReviewSchemaDoc() {
     "",
     `Allowed verdicts: ${LLM_REVIEW_VERDICTS.join(", ")}.`,
     `Required story ids: ${LLM_REVIEW_STORY_IDS.join(", ")}.`,
+    `Allowed coverage statuses: ${LLM_REVIEW_COVERAGE_STATUSES.join(", ")}.`,
+    `Required coverage ids: ${coverageIds.join(", ")}.`,
     "",
     "Required top-level fields:",
     "",
+    "- `coverageReviews`: exactly one object for each required coverage id.",
     "- `overallVerdict`: one allowed verdict.",
     "- `summary`: optional string.",
     "- `storyReviews`: exactly one object for each required story id.",
@@ -527,6 +630,20 @@ function buildReviewSchemaDoc() {
     "- `matchedEvidence`: array of strings.",
     "- `concerns`: array of strings.",
     "- `requiredFixes`: array of strings.",
+    "",
+    "Required coverage review fields:",
+    "",
+    "- `coverageId`: one required coverage id, with no duplicates.",
+    "- `status`: one allowed coverage status.",
+    "- `evidence`: array of strings.",
+    "- `concerns`: array of strings.",
+    "",
+    "Coverage status guidance:",
+    "",
+    "- `observed`: direct evidence covers the substory boundary.",
+    "- `partial`: evidence covers part of the substory but leaves important gaps.",
+    "- `unobserved`: the run has no direct evidence for the substory.",
+    "- `not-applicable`: the substory is out of scope for this run and the reason is stated.",
     "",
     "Verdict guidance:",
     "",
@@ -584,6 +701,8 @@ async function main() {
   const userStoriesSource = path.join(process.cwd(), "docs", "user-stories.md");
   const userStoriesSnapshotPath = path.join(args.outDir, "user-stories.md.snapshot");
   fs.copyFileSync(userStoriesSource, userStoriesSnapshotPath);
+  const userStoriesMarkdown = fs.readFileSync(userStoriesSnapshotPath, "utf8");
+  const coverageIds = coverageIdsFromUserStoriesMarkdown(userStoriesMarkdown);
 
   const openclawFirst = args.liveCanvas && !args.skipOpenClaw;
   const openclaw = openclawFirst
@@ -620,18 +739,20 @@ async function main() {
       reviewTemplate: reviewTemplatePath,
       userStoriesSnapshot: userStoriesSnapshotPath,
     },
+    requiredCoverageIds: coverageIds,
     userStoriesSnapshotSha256: sha256File(userStoriesSnapshotPath),
   };
   writeJson(manifestPath, manifest);
 
   fs.writeFileSync(reviewPromptPath, buildReviewPrompt({
     bundleDir: args.outDir,
+    coverageIds,
     evidencePath,
     manifestPath,
     userStoriesPath: userStoriesSnapshotPath,
   }));
-  writeJson(reviewTemplatePath, createLlmReviewTemplate());
-  fs.writeFileSync(reviewSchemaPath, buildReviewSchemaDoc());
+  writeJson(reviewTemplatePath, createLlmReviewTemplate(coverageIds));
+  fs.writeFileSync(reviewSchemaPath, buildReviewSchemaDoc(coverageIds));
   fs.writeFileSync(reportPath, buildReport({
     deterministic,
     evidencePath,

@@ -1,4 +1,8 @@
 import { shortText } from "./glass";
+import {
+  approvalOpenClawAskRequest,
+  setupOpenClawAskRequest,
+} from "./openclaw-ask-requests";
 
 export type ConnectionGuidance = {
   title: string;
@@ -30,7 +34,6 @@ function connectionHudFrameToText(frame: ConnectionHudFrame) {
   return [frame.header, "", frame.body, "", frame.hint].filter(Boolean).join("\n");
 }
 
-const OPENCLAW_AGENT_REPO_HINT = "See solavrc/openclaw-even-g2-node.";
 const REQUEST_ID_PATTERN = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
 const SAFE_REQUEST_ID_PATTERN = /^[a-z0-9][a-z0-9._:-]*$/i;
 const REQUEST_ID_PLACEHOLDER = "<requestId>";
@@ -59,13 +62,7 @@ function hasConcreteRequestId(requestId: string) {
 }
 
 function conversationalApprovalRequest(kind: "device" | "operator" | "node") {
-  if (kind === "node") return `Hey Claw, approve remaining Even G2 node tools. ${OPENCLAW_AGENT_REPO_HINT}`;
-  if (kind === "operator") return `Hey Claw, approve remaining Even G2 operator requests. ${OPENCLAW_AGENT_REPO_HINT}`;
-  return `Hey Claw, approve my pending Even G2 setup. ${OPENCLAW_AGENT_REPO_HINT}`;
-}
-
-function conversationalSetupRequest() {
-  return `Hey Claw, show my Even G2 setup QR. ${OPENCLAW_AGENT_REPO_HINT}`;
+  return approvalOpenClawAskRequest(kind);
 }
 
 function openClawAskBody(request: string) {
@@ -90,7 +87,7 @@ function hostCommand(approveCommand: string, discoveryCommand: string, requestId
 export function setupHudFrame(): ConnectionHudFrame {
   return {
     header: "OpenClaw Node",
-    body: openClawAskBody(conversationalSetupRequest()),
+    body: openClawAskBody(setupOpenClawAskRequest()),
     hint: "scan QR on phone",
   };
 }
@@ -172,7 +169,7 @@ function setupConnectionGuidance(): ConnectionGuidance {
       "`$ openclaw qr`",
       "",
       "Or ask OpenClaw:",
-      `"${conversationalSetupRequest()}"`,
+      `"${setupOpenClawAskRequest()}"`,
       "",
       "Then tap Scan setup QR on this phone.",
     ].join("\n"),

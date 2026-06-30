@@ -1,0 +1,36 @@
+{
+  "env": {
+    "shellEnv": {
+      "enabled": false
+    },
+    "vars": {}
+  },
+  "gateway": {
+    "mode": "local",
+    "bind": "lan",
+    "port": 19001,
+    "auth": {
+      "mode": "token",
+      "token": {
+        "source": "env",
+        "provider": "openclaw",
+        "id": "OPENCLAW_GATEWAY_TOKEN"
+      }
+    },
+    "controlUi": {
+      "enabled": false,
+      "allowedOrigins": [
+        "http://127.0.0.1:5174",
+        "http://localhost:5174",
+        "http://127.0.0.1:35162",
+        "http://localhost:35162"
+      ]
+    }
+  },
+  "plugins": {
+    "enabled": true
+  },
+  "tools": {
+    "profile": "minimal"
+  }
+}
