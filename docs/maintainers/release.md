@@ -78,9 +78,15 @@ become the session, voice, approval, and canvas surface. The phone stays focused
 on setup, connection status, HUD preview, voice mode selection, recovery, and
 diagnostics.
 
-Voice input is routed through OpenClaw. Speech provider, model, subscription,
-OAuth, API key, transcription prompt, and media-understanding choices stay in
-your Gateway configuration instead of inside the glasses app.
+For the recommended `Review` voice experience, start with xAI through OpenClaw
+Talk. When your Gateway exposes xAI transcription, SuperGrok or X Premium
+subscription access can give many users a fast, practical path for short G2
+voice turns, with the text shown on the glasses before the message is sent to
+the selected session.
+
+Voice input is still routed through OpenClaw. Speech provider, model,
+subscription, OAuth, API key, transcription prompt, and media-understanding
+choices stay in your Gateway configuration instead of inside the glasses app.
 
 Configuration examples and setup references:
 
