@@ -252,6 +252,168 @@ pixel-perfect assertion. The goal is to let the agent compare simulator output,
 OpenClaw node state, and [user-stories.md](user-stories.md) with fuzzy product
 judgment.
 
+### Isolated Test Gateway
+
+Do not point live E2E development at a maintainer's everyday Gateway unless the
+test is explicitly checking that exact environment. Use the Docker-backed
+isolated Gateway helper when collecting live OpenClaw evidence so node pairing,
+Gateway auth, and transient test sessions stay out of the active `~/.openclaw`
+context.
+
+Preview the generated config and Docker command without starting anything:
+
+```bash
+pnpm e2e:gateway:plan
+```
+
+Start the isolated Gateway:
+
+```bash
+pnpm e2e:gateway:start
+```
+
+The helper writes generated state under
+`.openclaw-even-g2-node/isolated-gateway/<run-id>/`. It creates a new
+`state/openclaw.json` instead of copying the user's active config. The visible
+base template lives at `scripts/isolated-openclaw-gateway.config.json`; the
+full-story E2E template lives at
+`scripts/isolated-openclaw-gateway.e2e.config.json`. The helper copies the
+selected shape and applies only runtime values such as port, control origins,
+and optional plugin allowlists. The default generated config is intentionally
+small:
+
+- `env.shellEnv.enabled=false` so login-shell imports do not hide missing
+  requirements;
+- `gateway.mode=local`, `gateway.bind=lan`, token auth via
+  `OPENCLAW_GATEWAY_TOKEN`, and the container Gateway port. The Gateway listens
+  on the container network so Docker port publishing works, while Docker
+  publishes it only to host loopback;
+- `gateway.controlUi.enabled=false` plus local dev/static origins;
+- `plugins.enabled=true`, with `plugins.allow` present only when `--plugin` is
+  passed;
+- `tools.profile=minimal`.
+
+The default template is enough to prove that an isolated Gateway starts and can
+be probed, but it is not enough to complete all user-story E2E coverage. Full
+story coverage also needs Gateway-owned voice/media configuration, setup
+approval state, a connected Even G2 node, node command approvals, and selected
+session evidence.
+
+By default the Docker container receives only the generated state directory as a
+writable `/home/node/.openclaw` mount. The helper may add these read-only binds
+when they exist:
+
+- `~/.openclaw/.env` to `/home/node/.openclaw/.env`;
+- the auth-profile secret directory to `/home/node/.config/openclaw`;
+- `~/.openclaw/agents/main/agent/openclaw-agent.sqlite*` and legacy auth JSON
+  files to `/home/node/.openclaw/.seed-auth/...`.
+
+The default `~/.openclaw/.env` bind is optional and skipped when the file is
+absent. If you pass `--env-file` explicitly, the helper fails before Docker
+startup when that file cannot be read.
+
+The auth DB seed is copied into the generated writable state before Gateway
+startup. This lets OpenClaw create task/session rows and fix local file modes
+inside the disposable container state without mutating the user's real Gateway
+context.
+
+It does not bind the user's `~/.openclaw/openclaw.json`, active sessions, or
+workspace as writable container state. The container also sets
+`OPENCLAW_AUTH_STORE_READONLY=1`. Add extra read-only inputs only when a test
+really needs them:
+
+```bash
+pnpm e2e:gateway:start -- --readonly-bind ~/.openclaw/credentials:/home/node/.openclaw/credentials
+```
+
+For full-story E2E coverage, use the bundled full E2E template instead of
+copying the maintainer config wholesale:
+
+```bash
+pnpm e2e:gateway:start -- --full-e2e-config
+```
+
+That template adds the Gateway-owned Review and Send now requirements documented
+in [gateway-voice-setup.md](gateway-voice-setup.md):
+
+- `plugins.entries.codex.enabled=true` plus a default `main` Agent using
+  `openai/gpt-5.5` through `agentRuntime.id=codex`, so the app's
+  `Ask OpenClaw with:` onboarding prompt can be tested through the same Agent
+  path a user would invoke;
+- `plugins.entries["voice-call"].config.streaming` with xAI selected for
+  OpenClaw Talk transcription;
+- the `xai` provider plugin enabled, relying on read-only mounted auth/profile
+  state for actual credentials;
+- `tools.media.audio` with a local Whisper CLI fallback for `Send now`.
+
+The `--full-e2e-config` preset also installs `@openclaw/codex` and
+`@openclaw/voice-call` inside the container before starting Gateway. If
+`openclaw qr --setup-code-only` still prints `plugin not installed: codex` or
+`plugin not installed: voice-call`, inspect the container install log or
+override the package with `--install-plugin <package>`.
+
+The full template intentionally does not enable `plugins.entries.openai`; the
+Agent model name remains the canonical `openai/gpt-5.5`, but execution is
+forced through the bundled Codex harness. Keep the provider plugin surface
+minimal unless a test proves a concrete requirement.
+
+The full E2E template still does not prove provider auth by itself. Verify
+`talk.catalog`, then prove the first Review recording reaches `talk.event`
+`ready` and returns transcript text. For `Send now`, make sure the selected
+session accepts audio attachments and the configured `tools.media.audio` command
+is available inside the Gateway container.
+
+If the user's OpenClaw setup uses a different Talk provider or media-audio
+chain, copy the bundled JSON to a local ignored path and pass it explicitly:
+
+```bash
+pnpm e2e:gateway:start -- --config-template /path/to/openclaw-even-g2-node-e2e.json
+```
+
+`start` prints `containerName`, `hostGatewayUrl`, `containerGatewayUrl`,
+`token`, an `approvalCommand`, an `e2eAgentCommand`, and a setup-code result.
+Before pairing the app, prove that the onboarding instruction itself is usable
+through the isolated Agent:
+
+```bash
+pnpm e2e:agent:onboarding -- --openclaw-container <containerName>
+```
+
+The smoke sends the exact setup request generated by `setupHudFrame()` and
+writes `.openclaw-even-g2-node/onboarding-agent-runs/<run-id>/evidence.json`.
+It fails if the Agent command does not complete or if the response does not
+give actionable OpenClaw/Even G2 setup QR guidance.
+
+Then use the setup code with the app/simulator. Use the printed approval
+command for isolated Gateway runs; it grants only the generated disposable state
+enough operator/admin scope to approve setup requests, then watches for Even G2
+device/operator/node approvals before the bootstrap token expires:
+
+```bash
+pnpm dev
+pnpm simulator 'http://127.0.0.1:5174/?resetPairing=1&e2eLog=1&setupCode=<setup-code>' \
+  --automation-port 9898
+pnpm device:approve:latest -- \
+  --openclaw-container <containerName> \
+  --e2e-isolated-state-dir .openclaw-even-g2-node/isolated-gateway/<run-id>/state \
+  --watch-ms 45000 \
+  --settle-ms 8000
+pnpm e2e:agent:live -- \
+  --node auto \
+  --openclaw-container <containerName> \
+  --openclaw-url <containerGatewayUrl> \
+  --openclaw-token <token>
+```
+
+`--e2e-isolated-state-dir` is intentionally limited to generated isolated
+Gateway state. Do not point it at a real user Gateway state directory.
+
+Stop the isolated Gateway when the run is finished:
+
+```bash
+pnpm e2e:gateway:stop
+```
+
 Start the app and simulator as usual. For production-build simulator runs where
 the agent needs structured HUD state logs, add `?e2eLog=1` to the app URL:
 
@@ -291,8 +453,8 @@ pnpm e2e:agent:live -- --node "Even G2" --canvas-text "E2E canvas check"
 ```
 
 For live runs against an already-running local Gateway, start the app and
-simulator, pair and approve the Even G2 node, resolve the connected `nodeId`,
-then pass that exact node to the evidence command:
+simulator, pair and approve the Even G2 node, then use `--node auto` or pass a
+specific connected `nodeId` to the evidence command:
 
 ```bash
 pnpm dev
@@ -302,7 +464,7 @@ pnpm device:approve:latest -- --watch-ms 45000
 openclaw nodes status --json
 pnpm e2e:agent:live -- \
   --simulator-url http://127.0.0.1:9898 \
-  --node "<connected Even G2 nodeId>" \
+  --node auto \
   --canvas-text "E2E canvas check"
 ```
 
@@ -532,6 +694,9 @@ failure.
 | `pnpm e2e:agent` | Agentic local review | Collects simulator/OpenClaw evidence and writes a prompt for Coding Agent fuzzy review. |
 | `pnpm e2e:agent:live` | Agentic local review | Same as `e2e:agent`, but also invokes `canvas.present` on the active OpenClaw node. |
 | `pnpm e2e:agent:review:validate` | Agentic local review | Validates `llm-review.json` against the required fuzzy-review schema. |
+| `pnpm e2e:gateway:plan` | Agentic local review support | Writes the minimal isolated Gateway config and prints Docker/E2E commands without starting Docker. |
+| `pnpm e2e:gateway:start` | Agentic local review support | Starts the Docker-backed isolated OpenClaw Gateway with generated state and read-only auth inputs. |
+| `pnpm e2e:gateway:stop` | Agentic local review support | Stops isolated Gateway containers created by the helper. |
 | `pnpm run pack` | Packaging | Builds and writes `openclaw-even-g2-node.ehpk`. |
 | `pnpm release:check` | CI / release gate | Runs broad release checks; release status separately reports the runtime Gateway whitelist review risk. |
 | `pnpm release:bundle` | Release artifact | Creates the local release bundle directory and prints the full bundle manifest JSON. |
