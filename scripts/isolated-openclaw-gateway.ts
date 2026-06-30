@@ -27,6 +27,7 @@ type ParsedArgs = {
   defaultAuthBinds: boolean;
   defaultEnvFile: boolean;
   envFile: string;
+  envFileProvided: boolean;
   hostPort: number;
   image: string;
   installPluginPackages: string[];
@@ -269,6 +270,7 @@ export function parseArgs(argv: string[], now = new Date()): ParsedArgs {
     defaultAuthBinds: true,
     defaultEnvFile: true,
     envFile: defaultEnvFile(),
+    envFileProvided: false,
     hostPort: DEFAULT_CONTAINER_PORT,
     image: DEFAULT_IMAGE,
     installPluginPackages: [],
@@ -338,6 +340,7 @@ export function parseArgs(argv: string[], now = new Date()): ParsedArgs {
     } else if (arg === "--env-file") {
       args.envFile = resolveHostPath(readFlagValue(argv, index, arg));
       args.defaultEnvFile = true;
+      args.envFileProvided = true;
       index += 1;
     } else if (arg === "--no-default-env-file") {
       args.defaultEnvFile = false;
@@ -422,7 +425,72 @@ export function createMinimalOpenClawConfig(input: {
 }
 
 function readGatewayConfigTemplate(templatePath: string): MinimalOpenClawConfig {
-  return JSON.parse(fs.readFileSync(templatePath, "utf8")) as MinimalOpenClawConfig;
+  const parsed = JSON.parse(fs.readFileSync(templatePath, "utf8")) as unknown;
+  assertGatewayConfigTemplate(parsed, templatePath);
+  return parsed;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function getRecord(value: Record<string, unknown>, key: string, context: string) {
+  const child = value[key];
+  if (!isRecord(child)) throw new Error(`${context}.${key} must be an object.`);
+  return child;
+}
+
+function expectString(value: Record<string, unknown>, key: string, context: string) {
+  if (typeof value[key] !== "string" || !value[key]) throw new Error(`${context}.${key} must be a non-empty string.`);
+}
+
+function expectBoolean(value: Record<string, unknown>, key: string, context: string) {
+  if (typeof value[key] !== "boolean") throw new Error(`${context}.${key} must be a boolean.`);
+}
+
+function expectStringArray(value: Record<string, unknown>, key: string, context: string) {
+  const child = value[key];
+  if (!Array.isArray(child) || child.some((item) => typeof item !== "string" || !item.trim())) {
+    throw new Error(`${context}.${key} must be an array of non-empty strings.`);
+  }
+}
+
+function assertGatewayConfigTemplate(value: unknown, templatePath: string): asserts value is MinimalOpenClawConfig {
+  if (!isRecord(value)) throw new Error(`${templatePath} must contain a JSON object.`);
+
+  const env = getRecord(value, "env", templatePath);
+  const shellEnv = getRecord(env, "shellEnv", `${templatePath}.env`);
+  expectBoolean(shellEnv, "enabled", `${templatePath}.env.shellEnv`);
+  if (!isRecord(env.vars)) throw new Error(`${templatePath}.env.vars must be an object.`);
+
+  const gateway = getRecord(value, "gateway", templatePath);
+  expectString(gateway, "mode", `${templatePath}.gateway`);
+  expectString(gateway, "bind", `${templatePath}.gateway`);
+  const port = gateway.port;
+  if (!Number.isInteger(port) || Number(port) < 1 || Number(port) > 65_535) {
+    throw new Error(`${templatePath}.gateway.port must be a TCP port from 1 to 65535.`);
+  }
+  const auth = getRecord(gateway, "auth", `${templatePath}.gateway`);
+  expectString(auth, "mode", `${templatePath}.gateway.auth`);
+  const token = getRecord(auth, "token", `${templatePath}.gateway.auth`);
+  expectString(token, "id", `${templatePath}.gateway.auth.token`);
+  expectString(token, "provider", `${templatePath}.gateway.auth.token`);
+  expectString(token, "source", `${templatePath}.gateway.auth.token`);
+  const controlUi = getRecord(gateway, "controlUi", `${templatePath}.gateway`);
+  expectBoolean(controlUi, "enabled", `${templatePath}.gateway.controlUi`);
+  expectStringArray(controlUi, "allowedOrigins", `${templatePath}.gateway.controlUi`);
+
+  const plugins = getRecord(value, "plugins", templatePath);
+  expectBoolean(plugins, "enabled", `${templatePath}.plugins`);
+  const allow = plugins.allow;
+  if (allow !== undefined && (!Array.isArray(allow) || allow.some((item) => typeof item !== "string" || !item.trim()))) {
+    throw new Error(`${templatePath}.plugins.allow must be an array of non-empty strings when present.`);
+  }
+  const entries = plugins.entries;
+  if (entries !== undefined && !isRecord(entries)) throw new Error(`${templatePath}.plugins.entries must be an object when present.`);
+
+  const tools = getRecord(value, "tools", templatePath);
+  expectString(tools, "profile", `${templatePath}.tools`);
 }
 
 function shellQuote(value: string) {
@@ -474,6 +542,8 @@ function defaultReadOnlyBinds(args: ParsedArgs): BindMount[] {
       source: args.envFile,
       target: `${CONTAINER_STATE_DIR}/.env`,
     });
+  } else if (args.envFileProvided && args.defaultEnvFile) {
+    throw new Error(`--env-file source is not readable: ${args.envFile}`);
   }
 
   if (!args.defaultAuthBinds) return binds;

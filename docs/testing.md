@@ -308,6 +308,10 @@ when they exist:
 - `~/.openclaw/agents/main/agent/openclaw-agent.sqlite*` and legacy auth JSON
   files to `/home/node/.openclaw/.seed-auth/...`.
 
+The default `~/.openclaw/.env` bind is optional and skipped when the file is
+absent. If you pass `--env-file` explicitly, the helper fails before Docker
+startup when that file cannot be read.
+
 The auth DB seed is copied into the generated writable state before Gateway
 startup. This lets OpenClaw create task/session rows and fix local file modes
 inside the disposable container state without mutating the user's real Gateway

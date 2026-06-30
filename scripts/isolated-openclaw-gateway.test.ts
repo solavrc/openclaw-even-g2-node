@@ -201,6 +201,39 @@ describe("isolated OpenClaw Gateway config", () => {
     expect(config.plugins.entries?.openai).toBeUndefined();
   });
 
+  it("rejects custom Gateway templates that omit required sections", () => {
+    const root = makeTempRoot();
+    const templatePath = path.join(root, "bad-openclaw.json");
+    touch(templatePath, JSON.stringify({
+      env: {
+        shellEnv: { enabled: false },
+        vars: {},
+      },
+      gateway: {
+        mode: "local",
+        bind: "lan",
+        port: 19001,
+        auth: {
+          mode: "token",
+          token: {
+            id: "OPENCLAW_GATEWAY_TOKEN",
+            provider: "openclaw",
+            source: "env",
+          },
+        },
+      },
+      plugins: { enabled: true },
+      tools: { profile: "minimal" },
+    }));
+
+    expect(() => createMinimalOpenClawConfig({
+      configTemplatePath: templatePath,
+      containerPort: 19001,
+      controlOrigins: [],
+      plugins: [],
+    })).toThrow("gateway.controlUi must be an object");
+  });
+
   it("keeps full E2E plugin entries when adding an allowlist", () => {
     const config = createMinimalOpenClawConfig({
       configTemplatePath: FULL_E2E_GATEWAY_CONFIG_TEMPLATE_PATH,
@@ -331,5 +364,16 @@ describe("isolated OpenClaw Gateway Docker plan", () => {
       "--readonly-bind",
       `${root}:/tmp/host-state:rw`,
     ])).toThrow("--readonly-bind only accepts ro mounts");
+  });
+
+  it("fails fast when an explicitly requested env file cannot be mounted", () => {
+    const root = makeTempRoot();
+
+    expect(() => buildGatewayPlan(planArgs([
+      "--out-root",
+      path.join(root, "runs"),
+      "--env-file",
+      path.join(root, "missing.env"),
+    ]))).toThrow("--env-file source is not readable");
   });
 });
