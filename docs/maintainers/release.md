@@ -200,7 +200,7 @@ screenshots from a previous UI revision.
 
 ## Release Notes
 
-Version `0.1.17`: <!-- x-release-please-version -->
+Version `0.2.0`: <!-- x-release-please-version -->
 
 ```text
 Initial OpenClaw Node beta.
