@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import { validateLlmReview } from "./llm-review-schema.ts";
+import { coverageIdsFromUserStoriesMarkdown, validateLlmReview } from "./llm-review-schema.ts";
 import { errorStack } from "./strict-helpers.ts";
 
 const HELP = `Validate an Even G2 agentic E2E llm-review.json file.
@@ -30,7 +30,11 @@ export function validateReviewFile(filePath: string) {
   } catch (error) {
     return [`Could not read or parse ${filePath}: ${error instanceof Error ? error.message : String(error)}`];
   }
-  return validateLlmReview(parsed);
+  const userStoriesSnapshotPath = path.join(path.dirname(filePath), "user-stories.md.snapshot");
+  const coverageIds = fs.existsSync(userStoriesSnapshotPath)
+    ? coverageIdsFromUserStoriesMarkdown(fs.readFileSync(userStoriesSnapshotPath, "utf8"))
+    : undefined;
+  return validateLlmReview(parsed, { coverageIds });
 }
 
 function main() {

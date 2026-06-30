@@ -4,6 +4,8 @@ import path from "node:path";
 
 const SIMULATOR_SOURCE_INPUTS = [
   "app.json",
+  "docs/testing.md",
+  "docs/user-stories.md",
   "index.html",
   "pnpm-lock.yaml",
   "src",

@@ -4,7 +4,14 @@ import fs from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { gitMetadata } from "./git-state.ts";
-import { createLlmReviewTemplate, LLM_REVIEW_STORY_IDS, LLM_REVIEW_VERDICTS } from "./llm-review-schema.ts";
+import {
+  coverageIdsFromUserStoriesMarkdown,
+  createLlmReviewTemplate,
+  LLM_REVIEW_COVERAGE_IDS,
+  LLM_REVIEW_COVERAGE_STATUSES,
+  LLM_REVIEW_STORY_IDS,
+  LLM_REVIEW_VERDICTS,
+} from "./llm-review-schema.ts";
 import {
   assertCaptureLooksVisible,
   captureSimulator,
@@ -445,10 +452,12 @@ function deterministicChecks(simulator: SimulatorEvidence, openclaw: OpenClawEvi
 
 export function buildReviewPrompt(input: {
   bundleDir: string;
+  coverageIds?: readonly string[];
   evidencePath: string;
   manifestPath: string;
   userStoriesPath: string;
 }) {
+  const coverageIds = input.coverageIds?.length ? input.coverageIds : LLM_REVIEW_COVERAGE_IDS;
   return `# Even G2 Agentic E2E Review
 
 You are reviewing the current OpenClaw Even G2 node behavior as a Coding Agent.
@@ -472,12 +481,27 @@ Review rules:
 - Use glassStates, sessionStates, voiceStates, and approvalStates as structured
   simulator evidence when present.
 - Mark missing evidence as inconclusive instead of guessing.
+- Review every numbered substory separately in coverageReviews. Mark substories
+  without direct evidence as "unobserved" or "partial"; do not hide gaps behind
+  a broad story-level "pass".
 - If OpenClaw node evidence exists, compare nodes.status / canvas.snapshot with the simulator state.
+
+Required coverage ids:
+
+${coverageIds.map((coverageId) => `- ${coverageId}`).join("\n")}
 
 Return JSON in this shape:
 
 \`\`\`json
 {
+  "coverageReviews": [
+    {
+      "coverageId": "${coverageIds.join(" | ")}",
+      "status": "${LLM_REVIEW_COVERAGE_STATUSES.join(" | ")}",
+      "evidence": [],
+      "concerns": []
+    }
+  ],
   "overallVerdict": "${LLM_REVIEW_VERDICTS.join(" | ")}",
   "summary": "",
   "storyReviews": [
@@ -497,12 +521,13 @@ Return JSON in this shape:
 
 The final file must be valid according to llm-review.schema.md and should be
 saved as llm-review.json in the bundle directory. Include all story ids exactly
-once. Use "warn" for scoped evidence gaps that do not indicate a behavior
-mismatch; use "fail" only when observed behavior contradicts docs/user-stories.md.
+once and every coverage id exactly once. Use "warn" for scoped evidence gaps
+that do not indicate a behavior mismatch; use "fail" only when observed
+behavior contradicts docs/user-stories.md.
 `;
 }
 
-function buildReviewSchemaDoc() {
+function buildReviewSchemaDoc(coverageIds: readonly string[]) {
   return [
     "# LLM Review Schema",
     "",
@@ -510,9 +535,12 @@ function buildReviewSchemaDoc() {
     "",
     `Allowed verdicts: ${LLM_REVIEW_VERDICTS.join(", ")}.`,
     `Required story ids: ${LLM_REVIEW_STORY_IDS.join(", ")}.`,
+    `Allowed coverage statuses: ${LLM_REVIEW_COVERAGE_STATUSES.join(", ")}.`,
+    `Required coverage ids: ${coverageIds.join(", ")}.`,
     "",
     "Required top-level fields:",
     "",
+    "- `coverageReviews`: exactly one object for each required coverage id.",
     "- `overallVerdict`: one allowed verdict.",
     "- `summary`: optional string.",
     "- `storyReviews`: exactly one object for each required story id.",
@@ -527,6 +555,20 @@ function buildReviewSchemaDoc() {
     "- `matchedEvidence`: array of strings.",
     "- `concerns`: array of strings.",
     "- `requiredFixes`: array of strings.",
+    "",
+    "Required coverage review fields:",
+    "",
+    "- `coverageId`: one required coverage id, with no duplicates.",
+    "- `status`: one allowed coverage status.",
+    "- `evidence`: array of strings.",
+    "- `concerns`: array of strings.",
+    "",
+    "Coverage status guidance:",
+    "",
+    "- `observed`: direct evidence covers the substory boundary.",
+    "- `partial`: evidence covers part of the substory but leaves important gaps.",
+    "- `unobserved`: the run has no direct evidence for the substory.",
+    "- `not-applicable`: the substory is out of scope for this run and the reason is stated.",
     "",
     "Verdict guidance:",
     "",
@@ -584,6 +626,8 @@ async function main() {
   const userStoriesSource = path.join(process.cwd(), "docs", "user-stories.md");
   const userStoriesSnapshotPath = path.join(args.outDir, "user-stories.md.snapshot");
   fs.copyFileSync(userStoriesSource, userStoriesSnapshotPath);
+  const userStoriesMarkdown = fs.readFileSync(userStoriesSnapshotPath, "utf8");
+  const coverageIds = coverageIdsFromUserStoriesMarkdown(userStoriesMarkdown);
 
   const openclawFirst = args.liveCanvas && !args.skipOpenClaw;
   const openclaw = openclawFirst
@@ -620,18 +664,20 @@ async function main() {
       reviewTemplate: reviewTemplatePath,
       userStoriesSnapshot: userStoriesSnapshotPath,
     },
+    requiredCoverageIds: coverageIds,
     userStoriesSnapshotSha256: sha256File(userStoriesSnapshotPath),
   };
   writeJson(manifestPath, manifest);
 
   fs.writeFileSync(reviewPromptPath, buildReviewPrompt({
     bundleDir: args.outDir,
+    coverageIds,
     evidencePath,
     manifestPath,
     userStoriesPath: userStoriesSnapshotPath,
   }));
-  writeJson(reviewTemplatePath, createLlmReviewTemplate());
-  fs.writeFileSync(reviewSchemaPath, buildReviewSchemaDoc());
+  writeJson(reviewTemplatePath, createLlmReviewTemplate(coverageIds));
+  fs.writeFileSync(reviewSchemaPath, buildReviewSchemaDoc(coverageIds));
   fs.writeFileSync(reportPath, buildReport({
     deterministic,
     evidencePath,
