@@ -1802,7 +1802,8 @@ export function App() {
   }
 
   function scheduleReconnect(reason = "disconnected", options: { operatorOnly?: boolean } = {}) {
-    if (!gatewayUrlRef.current || connectedRef.current || reconnectTimerRef.current !== null) return;
+    if (!gatewayUrlRef.current || reconnectTimerRef.current !== null) return;
+    if (connectedRef.current && !options.operatorOnly) return;
     const attempt = Math.min(reconnectAttemptRef.current, 5);
     const delayMs = Math.min(MAX_RECONNECT_DELAY_MS, 1000 * (2 ** attempt));
     reconnectAttemptRef.current += 1;
@@ -1811,14 +1812,18 @@ export function App() {
     reconnectTimerRef.current = window.setTimeout(() => {
       reconnectTimerRef.current = null;
       setRetryDueAtMs(null);
-      if (options.operatorOnly && retryOperatorApprovalNow("checking operator approval")) return;
+      if (options.operatorOnly) {
+        if (retryOperatorApprovalNow("checking operator approval")) return;
+        if (connectedRef.current) return;
+      }
       connect();
     }, delayMs);
   }
 
   function retryNow() {
-    if (!gatewayUrlRef.current.trim() || connectedRef.current) return;
+    if (!gatewayUrlRef.current.trim()) return;
     if (retryOperatorApprovalNow("checking operator approval")) return;
+    if (connectedRef.current) return;
     reconnectGatewayNow("retrying now");
   }
 
@@ -3239,7 +3244,8 @@ export function App() {
     }
     if (showCheckAgain) {
       if (showOperatorApprovalCheck) {
-        reconnectGatewayNow("checking operator approval");
+        if (retryOperatorApprovalNow("checking operator approval")) return;
+        checkGatewayStatus();
         return;
       }
       checkGatewayStatus();
