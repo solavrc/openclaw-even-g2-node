@@ -664,7 +664,7 @@ export class GatewayWsSession {
     if (this.retriedStoredTokenFailureWithBootstrap || this.lastConnectAuthSource !== "device-token") return false;
     if (!this.lastConnectNonce) return false;
     if (!this.options.bootstrapToken?.trim()) return false;
-    if (gatewayErrorRequestsReconnectPause(error)) return false;
+    if (gatewayErrorIsAuthPause(error)) return false;
     const normalized = [
       error?.code,
       error?.message,
@@ -747,8 +747,18 @@ function shouldPauseOperatorReconnect(reason: string) {
   );
 }
 
+function gatewayErrorIsAuthPause(error?: GatewayErrorShape) {
+  const normalized = [
+    error?.code,
+    error?.details?.code,
+    error?.message,
+    error?.details?.reason,
+  ].filter(Boolean).join(" ").toLowerCase();
+  return normalized.includes("auth_paused") || normalized.includes("too many failed authentication attempts");
+}
+
 function gatewayErrorRequestsReconnectPause(error?: GatewayErrorShape) {
-  return Boolean(error?.details?.pauseReconnect || error?.code === "auth_paused" || error?.details?.code === "auth_paused");
+  return Boolean(error?.details?.pauseReconnect || gatewayErrorIsAuthPause(error));
 }
 
 function makeTransportCloseEvent(reason = "") {

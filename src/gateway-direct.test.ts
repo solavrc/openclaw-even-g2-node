@@ -628,6 +628,54 @@ describe("Gateway session events", () => {
     expect(authStore.load(identity.deviceId, "node", "wss://gateway.example.test")).toBeNull();
   });
 
+  it("falls back to setup bootstrap for approval pauses from rejected stored tokens", async () => {
+    vi.spyOn(Date, "now").mockReturnValue(1700000000000);
+    const storage = new MemoryStorage();
+    const authStore = new BrowserDeviceAuthStore(storage);
+    authStore.save(identity.deviceId, "node", "stored-device-token", [], "wss://gateway.example.test");
+    const session = new GatewayWsSession({
+      url: "wss://gateway.example.test",
+      bootstrapToken: "fresh-bootstrap",
+      role: "node",
+      scopes: [],
+      caps: ["device"],
+      commands: ["device.status"],
+      client: buildEvenG2ClientInfo("node", "inst-1"),
+      userAgent: "test",
+      WebSocketCtor: FakeGatewayWebSocketCtor,
+      identityStore: {
+        loadOrCreate: async () => identity,
+        sign: async (payload: string) => `sig:${payload}`,
+      },
+      authStore,
+    });
+
+    await session.connect();
+    const ws = FakeGatewayWebSocket.instances[0]!;
+    ws.receive({ type: "event", event: "connect.challenge", payload: { nonce: "nonce-1" } });
+    await vi.waitFor(() => expect(lastConnectParams(ws).params?.auth).toEqual({ token: "stored-device-token" }));
+
+    ws.receive({
+      type: "res",
+      id: "__connect__",
+      ok: false,
+      error: {
+        code: "approval_required",
+        message: "higher role than currently approved",
+        details: {
+          pauseReconnect: true,
+          reason: "approval required",
+        },
+      },
+    });
+
+    await vi.waitFor(() => {
+      expect(ws.sent.filter((item) => item.includes("\"method\":\"connect\""))).toHaveLength(2);
+    });
+    expect(lastConnectParams(ws).params?.auth).toEqual({ bootstrapToken: "fresh-bootstrap" });
+    expect(authStore.load(identity.deviceId, "node", "wss://gateway.example.test")).toBeNull();
+  });
+
   it("ignores late node-open callbacks after the direct transport closes", async () => {
     vi.spyOn(Date, "now").mockReturnValue(1700000000000);
     const messages: Array<Record<string, unknown>> = [];
