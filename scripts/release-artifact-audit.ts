@@ -14,7 +14,6 @@ const SCAN_ROOTS = [
   "app.json",
   "index.html",
   "package.json",
-  "openclaw-node-evenhub-icon-24.png",
   "tsconfig.json",
   "vite.config.ts",
   "src",

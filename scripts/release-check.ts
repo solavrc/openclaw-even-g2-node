@@ -488,7 +488,6 @@ async function main(): Promise<void> {
   await run("pnpm", ["audit"]);
   await smokeAppPack();
   await run("tsx", ["scripts/release-artifact-audit.ts"]);
-  await run("tsx", ["scripts/visual-assets-audit.ts"]);
 
   const releaseBlockers: string[] = [];
   if (process.env.EVENG2_ALLOW_DEV_NETWORK_WHITELIST !== "1") {

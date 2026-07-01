@@ -57,7 +57,6 @@
     "device:preview:latest": "tsx scripts/approve-even-g2-pairing.ts --dry-run",
     "device:approve:latest": "tsx scripts/approve-even-g2-pairing.ts",
     "version:bump": "tsx scripts/bump-version.ts",
-    "release:screenshots:mark": "tsx scripts/mark-store-screenshots.ts",
     "release:check": "tsx scripts/release-check.ts",
     "release:bundle": "tsx scripts/release-bundle.ts",
     "release:bundle:summary": "tsx scripts/release-bundle.ts --summary",

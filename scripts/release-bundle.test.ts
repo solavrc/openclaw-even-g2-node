@@ -15,33 +15,6 @@ describe("releaseBundleSummary", () => {
         sizeBytes: 184727,
         sha256: "a".repeat(64),
       },
-      evenHubIcon: {
-        file: "openclaw-node-evenhub-icon-24.png",
-        sha256: "b".repeat(64),
-      },
-      storeScreenshots: [
-        {
-          file: "evenhub-screenshots/01.png",
-          height: 288,
-          sha256: "c".repeat(64),
-          sizeBytes: 4001,
-          width: 576,
-        },
-      ],
-      storeScreenshotsSource: {
-        schemaVersion: 1,
-        captureSource: "official-evenhub-simulator-camera",
-        editingPolicy: "none; screenshots are direct simulator captures",
-        generatedAt: "2026-06-26T21:06:46.158Z",
-        simulatorSourceSha256: "d".repeat(64),
-        git: {
-          dirtyContentSha256: "e".repeat(64),
-          head: "f".repeat(40),
-          statusPorcelain: "",
-          worktreeClean: true,
-        },
-        screenshots: [],
-      },
       generatedAt: "2026-06-26T21:23:03.590Z",
       network: {
         whitelist: [],
@@ -68,12 +41,6 @@ describe("releaseBundleSummary", () => {
         file: "openclaw-even-g2-node-0.1.9.ehpk",
         sizeBytes: 184727,
         sha256: "a".repeat(64),
-      },
-      storeScreenshotCount: 1,
-      storeScreenshotsSource: {
-        generatedAt: "2026-06-26T21:06:46.158Z",
-        head: "f".repeat(40),
-        worktreeClean: true,
       },
       network: {
         reviewRequired: true,

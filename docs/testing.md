@@ -626,7 +626,7 @@ environment-specific for normal maintainer release flow.
 
 Use portal-installed private or beta builds for release parity:
 
-- Portal private build install: checks manifest enforcement, icon/install UI,
+- Portal private build install: checks manifest enforcement, install UI,
   permission prompts, and first-frame boot.
 - Beta build install: checks reviewer parity and locked-phone behavior.
 
