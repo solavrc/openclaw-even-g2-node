@@ -320,6 +320,7 @@ const MAX_RECONNECT_DELAY_MS = 15000;
 const E2E_SESSION_MARKER = "[openclaw-even-g2-node:e2e:session]";
 const E2E_VOICE_MARKER = "[openclaw-even-g2-node:e2e:voice]";
 const E2E_APPROVAL_MARKER = "[openclaw-even-g2-node:e2e:approval]";
+const E2E_EXIT_MARKER = "[openclaw-even-g2-node:e2e:exit]";
 function devLog(...args: unknown[]) {
   if (import.meta.env.DEV) globalThis["console"].info(...args);
 }
@@ -363,6 +364,10 @@ function emitE2eVoiceState(payload: Record<string, unknown>) {
 
 function emitE2eApprovalState(payload: Record<string, unknown>) {
   emitE2eState(E2E_APPROVAL_MARKER, payload);
+}
+
+function emitE2eExitState(payload: Record<string, unknown>) {
+  emitE2eState(E2E_EXIT_MARKER, payload);
 }
 
 function e2eVoiceModeFromSearch(search: string) {
@@ -2629,15 +2634,23 @@ export function App() {
   async function requestGlassAppExit() {
     const bridge = bridgeRef.current;
     if (!bridge) {
+      emitE2eExitState({ action: "root-exit-unavailable", reason: "bridge-unavailable" });
       renderGlassExitUnavailable();
       return;
     }
     setStatus("exit requested");
+    emitE2eExitState({ action: "root-exit-requested", exitMode: 1 });
     try {
       const ok = await bridge.shutDownPageContainer(1);
+      emitE2eExitState({ action: "root-exit-result", exitMode: 1, ok });
       devLog("[Even G2] shutDownPageContainer result", ok, { exitMode: 1 });
       if (ok !== true) renderGlassExitUnavailable();
     } catch (error) {
+      emitE2eExitState({
+        action: "root-exit-failed",
+        exitMode: 1,
+        error: error instanceof Error ? error.message : String(error),
+      });
       devLog("[Even G2] shutDownPageContainer failed", error);
       renderGlassExitUnavailable();
     }

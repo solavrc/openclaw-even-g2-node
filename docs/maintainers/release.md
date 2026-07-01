@@ -187,8 +187,10 @@ Use [user-guide.md](../user-guide.md) as the source of truth for expected user
 flows when selecting screenshot states.
 
 Use the official simulator camera button for store screenshots when possible.
-The generated PNG must represent a screen the app can actually show. Useful
-HUD states:
+The generated PNG must represent a screen the app can actually show. Keep the
+original capture files for reviewer questions; `release/evenhub-screenshots/manifest.json`
+records PNG hashes and the simulator/UI source fingerprint so later file changes
+or stale captures are visible. Useful HUD states:
 
 ```bash
 pnpm dev -- --host 127.0.0.1 --port 5174 --strictPort
@@ -200,10 +202,10 @@ pnpm simulator 'http://127.0.0.1:5174/?resetPairing=1&simFixture=canvasTutorial'
 ```
 
 For local visual checks, `pnpm sim:fixtures` and `pnpm sim:capture` also
-write review PNGs. Use those for quick inspection, but prefer the official
-simulator camera button when preparing final Even Hub listing images. The raw
-`glassesPath` PNG can appear solid green in normal image viewers because the
-simulator encodes the useful HUD signal in alpha.
+write review PNGs. Use those for quick inspection, but do not describe them as
+official simulator camera-button captures. The raw `glassesPath` PNG can appear
+solid green in normal image viewers because the simulator encodes the useful HUD
+signal in alpha.
 
 Use real G2 private or beta testing for final approval screenshots and
 lifecycle evidence.
