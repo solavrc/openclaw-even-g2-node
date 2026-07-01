@@ -2,7 +2,7 @@
   "package_id": "com.solavrc.openclaweveng2node",
   "edition": "202601",
   "name": "OpenClaw Node",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "min_app_version": "2.0.0",
   "min_sdk_version": "0.0.11",
   "entrypoint": "index.html",

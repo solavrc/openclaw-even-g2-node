@@ -1,6 +1,6 @@
 {
   "name": "@solavrc/openclaw-even-g2-node",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "type": "module",
   "description": "Even G2 node for OpenClaw.",

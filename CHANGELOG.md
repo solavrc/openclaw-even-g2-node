@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.3.0](https://github.com/solavrc/openclaw-even-g2-node/compare/openclaw-even-g2-node-v0.2.0...openclaw-even-g2-node-v0.3.0) (2026-07-01)
+
+
+### Bug Fixes
+
+* address Even Hub review rejection feedback ([53084a5](https://github.com/solavrc/openclaw-even-g2-node/commit/53084a5506765eb36eda630a5e8db2a2a114edfe))
+* address Even Hub review rejection feedback ([dc06d02](https://github.com/solavrc/openclaw-even-g2-node/commit/dc06d02b3c07c685195a68860bcb8d9917bb282e))
+* remove release screenshot and icon bundle plumbing ([761b08f](https://github.com/solavrc/openclaw-even-g2-node/commit/761b08fcfd2a7cd3760d2552aa64ed1868a78c34))
+* remove release screenshot and icon bundle plumbing ([31ee981](https://github.com/solavrc/openclaw-even-g2-node/commit/31ee981aec2352dc3f0c4e157a93ed2610cac173))
+
 ## [0.2.0](https://github.com/solavrc/openclaw-even-g2-node/compare/openclaw-even-g2-node-v0.1.17...openclaw-even-g2-node-v0.2.0) (2026-06-30)
 
 
