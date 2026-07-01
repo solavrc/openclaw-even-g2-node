@@ -14,13 +14,19 @@ export type StoreScreenshot = {
 
 export type StoreScreenshotSourceManifest = {
   schemaVersion: 1;
+  captureSource?: string;
+  editingPolicy?: string;
   generatedAt: string;
+  reviewerNote?: string;
   simulatorSourceSha256: string;
   git: ReturnType<typeof gitMetadata>;
   screenshots: StoreScreenshot[];
 };
 
 export const STORE_SCREENSHOT_MANIFEST_FILE = "manifest.json";
+export const STORE_SCREENSHOT_CAPTURE_SOURCE = "official-evenhub-simulator-camera";
+export const STORE_SCREENSHOT_EDITING_POLICY = "none; screenshots are direct simulator captures";
+export const STORE_SCREENSHOT_REVIEWER_NOTE = "Store screenshots should be captured directly from the Even Hub simulator camera button without manual editing; this manifest records file hashes to detect later changes.";
 
 export function storeScreenshotsDir(root = process.cwd()) {
   return path.join(root, "release", "evenhub-screenshots");
@@ -81,7 +87,10 @@ export function writeStoreScreenshotSourceManifest(root = process.cwd()): StoreS
   }
   const manifest: StoreScreenshotSourceManifest = {
     schemaVersion: 1,
+    captureSource: STORE_SCREENSHOT_CAPTURE_SOURCE,
+    editingPolicy: STORE_SCREENSHOT_EDITING_POLICY,
     generatedAt: new Date().toISOString(),
+    reviewerNote: STORE_SCREENSHOT_REVIEWER_NOTE,
     simulatorSourceSha256: simulatorSourceSha256(root),
     git: gitMetadata(root),
     screenshots,
@@ -109,6 +118,12 @@ export function storeScreenshotSourceManifestProblems({
   }
   if (!manifest.generatedAt || Number.isNaN(Date.parse(manifest.generatedAt))) {
     problems.push("Even Hub store screenshot source manifest has no valid generatedAt timestamp.");
+  }
+  if (manifest.captureSource !== STORE_SCREENSHOT_CAPTURE_SOURCE) {
+    problems.push("Even Hub store screenshot source manifest does not confirm official simulator camera capture.");
+  }
+  if (manifest.editingPolicy !== STORE_SCREENSHOT_EDITING_POLICY) {
+    problems.push("Even Hub store screenshot source manifest does not confirm the no-editing screenshot policy.");
   }
   if (!manifest.git?.head) {
     problems.push("Even Hub store screenshot source manifest has no git HEAD metadata.");

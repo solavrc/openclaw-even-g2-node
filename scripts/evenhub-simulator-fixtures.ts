@@ -10,6 +10,7 @@ import { simulatorSourceSha256 } from "./simulator-source-fingerprint.ts";
 import { errorStack } from "./strict-helpers.ts";
 
 export type FixtureFlow = "session" | "sessionSelector" | "voiceReview" | "canvas" | "canvasTutorial" | "approval" | "recovery" | "storeChat" | "storeVoice" | "sendNow";
+type BuildFlow = "setup" | "rootExit";
 
 export const FIXTURE_FLOWS: FixtureFlow[] = ["session", "sessionSelector", "voiceReview", "canvas", "canvasTutorial", "approval", "recovery", "storeChat", "storeVoice", "sendNow"];
 const OUT_DIR = process.env.EVENG2_SIMULATOR_OUT_DIR || "/tmp";
@@ -141,7 +142,7 @@ async function runCommand(command: string, args: string[]) {
   });
 }
 
-async function runE2e(flow: "setup" | FixtureFlow, simulatorPort: number) {
+async function runE2e(flow: BuildFlow | FixtureFlow, simulatorPort: number) {
   const child = spawnProcess("pnpm", ["sim:e2e"], {
     env: {
       ...process.env,
@@ -189,7 +190,7 @@ export function simulatorFixtureAppUrl(flow: FixtureFlow, appPort: number) {
   return `http://127.0.0.1:${appPort}/?${params.toString()}`;
 }
 
-async function runSetupBuildSmoke() {
+async function runBuildSmoke(flow: BuildFlow) {
   const appPort = await freePort();
   const simulatorPort = await freePort();
   let server: ChildProcess | null = null;
@@ -202,12 +203,14 @@ async function runSetupBuildSmoke() {
       },
     });
     const appBaseUrl = `http://127.0.0.1:${appPort}/openclaw-even-g2-node/`;
-    const appUrl = `${appBaseUrl}?resetPairing=1`;
+    const params = new URLSearchParams({ resetPairing: "1" });
+    if (flow === "rootExit") params.set("e2eLog", "1");
+    const appUrl = `${appBaseUrl}?${params.toString()}`;
     await waitForHttp(`${appBaseUrl}health`);
 
     simulator = spawnProcess("pnpm", ["simulator", appUrl, "--automation-port", String(simulatorPort)]);
     await waitForSimulator(`http://127.0.0.1:${simulatorPort}`);
-    return await runE2e("setup", simulatorPort);
+    return await runE2e(flow, simulatorPort);
   } finally {
     await stopProcess(simulator);
     await stopProcess(server);
@@ -241,7 +244,8 @@ function writeReport(report: unknown) {
 async function main() {
   await runCommand("pnpm", ["build"]);
   const results: E2eResult[] = [];
-  results.push(await runSetupBuildSmoke());
+  results.push(await runBuildSmoke("setup"));
+  results.push(await runBuildSmoke("rootExit"));
   for (const flow of FIXTURE_FLOWS) {
     results.push(await runFixtureSmoke(flow));
   }
