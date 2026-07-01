@@ -58,12 +58,6 @@ App tagline:
 OpenClaw sessions on your glasses
 ```
 
-App icon:
-
-```text
-openclaw-node-evenhub-icon-24.png
-```
-
 Long description:
 
 ```text
@@ -170,28 +164,9 @@ Contact:
 
 ## Screenshots To Capture
 
-Current Even Hub screenshots are kept in `release/evenhub-screenshots/`.
-Use up to the store limit, but keep the default set focused on:
-
-- `01-glass-setup.png`: setup onboarding, with the short `Ask OpenClaw with`
-  prompt and OpenClaw logo background.
-- `02-glass-chat.png`: selected-session chat preview using the real session HUD
-  renderer.
-- `03-glass-voice-review.png`: Review voice input preview using the real voice
-  panel renderer.
-- `04-glass-canvas.png`: canvas tutorial visual preview.
-- `05-phone-setup.png`: phone setup/status screen.
-- `06-phone-voice-input.png`: phone Voice input settings screen.
-
-Use [user-guide.md](../user-guide.md) as the source of truth for expected user
-flows when selecting screenshot states.
-
-Use the official simulator camera button for store screenshots when possible.
-The generated PNG must represent a screen the app can actually show. Do not
-manually edit store screenshots; if review asks, confirm that they were captured
-directly from the official Even Hub simulator camera button and that
-`release/evenhub-screenshots/manifest.json` records the PNG hashes. Useful HUD
-states:
+Prepare Even Hub listing screenshots outside the release bundle. Keep the set
+focused on actual glasses HUD states, not phone setup or diagnostics screens.
+Useful HUD states:
 
 ```bash
 pnpm dev -- --host 127.0.0.1 --port 5174 --strictPort
@@ -203,25 +178,13 @@ pnpm simulator 'http://127.0.0.1:5174/?resetPairing=1&simFixture=canvasTutorial'
 ```
 
 For local visual checks, `pnpm sim:fixtures` and `pnpm sim:capture` also
-write review PNGs. Use those for quick inspection, but prefer the official
-simulator camera button when preparing final Even Hub listing images. The raw
-`glassesPath` PNG can appear solid green in normal image viewers because the
-simulator encodes the useful HUD signal in alpha.
+write review PNGs. Use those for quick inspection, but do not describe them as
+official simulator camera-button captures. The raw `glassesPath` PNG can appear
+solid green in normal image viewers because the simulator encodes the useful HUD
+signal in alpha.
 
 Use real G2 private or beta testing for final approval screenshots and
 lifecycle evidence.
-
-After replacing files in `release/evenhub-screenshots/`, stamp them with the
-current UI/source fingerprint:
-
-```bash
-pnpm release:screenshots:mark
-```
-
-`pnpm release:bundle` and `pnpm release:status` reject store screenshots
-whose source manifest is missing or older than the current simulator/UI source.
-This does not replace visual review; it prevents accidentally bundling
-screenshots from a previous UI revision.
 
 ## Release Notes
 
@@ -349,9 +312,8 @@ pnpm release:status:summary
 - `reviewRisks` item for the runtime user-owned WebSocket Gateway whitelist
 - `privateRehearsalBlockers: []`
 
-Use `pnpm release:status` when you need the full bundle manifest and
-screenshot metadata in one JSON document. Use the summary command for ordinary
-checks so the terminal output stays reviewable.
+Use `pnpm release:status` when you need the full release readiness report. Use
+the summary command for ordinary checks so the terminal output stays reviewable.
 
 This means the package is suitable for maintainer rehearsal and Even Hub review
 submission, while final public release still depends on review accepting or
@@ -368,7 +330,7 @@ Before submitting for Even Hub review:
   events, lifecycle, or phone/glasses rendering parity;
 - run `pnpm release:status:summary` and confirm
   `reviewSubmissionReady: true`; use `pnpm release:status` if you need to
-  inspect the full bundle manifest and screenshot metadata;
+  inspect the full release readiness report;
 - confirm the GitHub repository exists at
   `https://github.com/solavrc/openclaw-even-g2-node`;
 - confirm `origin` is `https://github.com/solavrc/openclaw-even-g2-node.git`;
@@ -495,10 +457,10 @@ in terminal output. Both commands create the same release directory.
 
 `pnpm release:status:summary` is a lightweight preflight summary. It does not
 run the full test suite. It reports the current package id, version, readiness
-flags, known review risks, Git HEAD, release bundle checksum, screenshot count,
-and artifact warnings. `pnpm release:status` prints the full JSON
-report with bundle details, optional simulator fixture metadata, screenshot metadata,
-Git remote, branch commit count, privacy URL, and support URL. If
+flags, known review risks, Git HEAD, release bundle checksum, and artifact
+warnings. `pnpm release:status` prints the full JSON report with bundle details,
+optional simulator fixture metadata, Git remote, branch commit count, privacy
+URL, and support URL. If
 `openclaw-even-g2-node.ehpk` exists and differs from the release bundle `.ehpk`,
 rerun `pnpm release:bundle:summary`.
 

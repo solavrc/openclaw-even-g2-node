@@ -16,7 +16,6 @@ import {
   simulatorFixturesReportAgeMs,
   simulatorFixturesWarning,
   STATIC_REVIEW_RISKS,
-  storeScreenshotBundleProblems,
   submissionCopyBundleProblems,
 } from "./release-status.ts";
 
@@ -38,14 +37,6 @@ function runGit(dir: string, args: string[]) {
     throw new Error(`git ${args.join(" ")} failed: ${result.stderr}`);
   }
   return result.stdout.trim();
-}
-
-function tinyPng(width: number, height: number) {
-  const header = Buffer.from("89504e470d0a1a0a0000000d49484452", "hex");
-  const dimensions = Buffer.alloc(8);
-  dimensions.writeUInt32BE(width, 0);
-  dimensions.writeUInt32BE(height, 4);
-  return Buffer.concat([header, dimensions, Buffer.from("00000000", "hex")]);
 }
 
 describe("git state helpers", () => {
@@ -421,23 +412,6 @@ describe("release status review risks", () => {
           sizeBytes: 123,
           sha256: "c".repeat(64),
         },
-        storeScreenshots: [
-          { file: "evenhub-screenshots/01.png", width: 576, height: 288, sizeBytes: 1, sha256: "d".repeat(64) },
-        ],
-        storeScreenshotsSource: {
-          schemaVersion: 1,
-          captureSource: "official-evenhub-simulator-camera",
-          editingPolicy: "none; screenshots are direct simulator captures",
-          generatedAt: "2026-06-26T12:00:00.000Z",
-          simulatorSourceSha256: "e".repeat(64),
-          git: {
-            dirtyContentSha256: "f".repeat(64),
-            head: "a".repeat(40),
-            statusPorcelain: "",
-            worktreeClean: true,
-          },
-          screenshots: [],
-        },
       },
       blockers: [],
       privateRehearsalBlockers: [],
@@ -465,10 +439,6 @@ describe("release status review risks", () => {
       },
       bundle: {
         ehpkFile: "openclaw-even-g2-node-0.1.9.ehpk",
-        screenshotCount: 1,
-        screenshotSource: {
-          worktreeClean: true,
-        },
       },
       reviewRisks: STATIC_REVIEW_RISKS,
     });
@@ -513,170 +483,6 @@ describe("release status submission copy", () => {
       "release bundle review-inquiry.md is missing the current public review risk section.",
       "release bundle review-inquiry.md is missing the review inquiry draft.",
     ]);
-  });
-});
-
-describe("release status store screenshots", () => {
-  it("accepts bundled 576x288 screenshots with matching metadata", () => {
-    const dir = tempDir();
-    const screenshot = path.join(dir, "evenhub-screenshots", "01.png");
-    fs.mkdirSync(path.dirname(screenshot), { recursive: true });
-    fs.writeFileSync(screenshot, tinyPng(576, 288));
-    const screenshotSha256 = crypto.createHash("sha256").update(fs.readFileSync(screenshot)).digest("hex");
-    const screenshotSize = fs.statSync(screenshot).size;
-
-    expect(storeScreenshotBundleProblems({
-      storeScreenshots: [{
-        file: "evenhub-screenshots/01.png",
-        height: 288,
-        sha256: screenshotSha256,
-        sizeBytes: screenshotSize,
-        width: 576,
-      }],
-      storeScreenshotsSource: {
-        schemaVersion: 1,
-        captureSource: "official-evenhub-simulator-camera",
-        editingPolicy: "none; screenshots are direct simulator captures",
-        generatedAt: "2026-06-26T12:00:00.000Z",
-        simulatorSourceSha256: "current-source",
-        git: {
-          dirtyContentSha256: "clean",
-          head: "a".repeat(40),
-          statusPorcelain: "",
-          worktreeClean: true,
-        },
-        screenshots: [{
-          file: "01.png",
-          height: 288,
-          sha256: screenshotSha256,
-          sizeBytes: screenshotSize,
-          width: 576,
-        }],
-      },
-    }, dir, "current-source")).toEqual([]);
-  });
-
-  it("reports missing, oversized, and wrong-sized screenshot bundles", () => {
-    const dir = tempDir();
-    const screenshot = path.join(dir, "evenhub-screenshots", "01.png");
-    fs.mkdirSync(path.dirname(screenshot), { recursive: true });
-    fs.writeFileSync(screenshot, tinyPng(300, 200));
-
-    expect(storeScreenshotBundleProblems(null, dir)).toContain("release bundle has no Even Hub store screenshots.");
-    expect(storeScreenshotBundleProblems({
-      storeScreenshots: Array.from({ length: 7 }, (_, index) => ({
-        file: index === 0 ? "evenhub-screenshots/01.png" : `evenhub-screenshots/missing-${index}.png`,
-        height: 200,
-        sha256: "bad",
-        sizeBytes: 1,
-        width: 300,
-      })),
-    }, dir).join("\n")).toContain("expected 576x288");
-  });
-
-  it("rejects screenshots outside the release bundle directory", () => {
-    const dir = tempDir();
-    const outside = path.join(path.dirname(dir), `${path.basename(dir)}-outside.png`);
-    fs.writeFileSync(outside, tinyPng(576, 288));
-
-    expect(storeScreenshotBundleProblems({
-      storeScreenshots: [{
-        file: `../${path.basename(outside)}`,
-        height: 288,
-        sha256: crypto.createHash("sha256").update(fs.readFileSync(outside)).digest("hex"),
-        sizeBytes: fs.statSync(outside).size,
-        width: 576,
-      }],
-    }, dir)).toEqual([`../${path.basename(outside)} is missing from the release bundle.`]);
-  });
-
-  it("requires store screenshot source metadata for release readiness", () => {
-    const dir = tempDir();
-    const screenshot = path.join(dir, "evenhub-screenshots", "01.png");
-    fs.mkdirSync(path.dirname(screenshot), { recursive: true });
-    fs.writeFileSync(screenshot, tinyPng(576, 288));
-    const screenshotSha256 = crypto.createHash("sha256").update(fs.readFileSync(screenshot)).digest("hex");
-    const screenshotSize = fs.statSync(screenshot).size;
-    const bundle = {
-      storeScreenshots: [{
-        file: "evenhub-screenshots/01.png",
-        height: 288,
-        sha256: screenshotSha256,
-        sizeBytes: screenshotSize,
-        width: 576,
-      }],
-    };
-
-    expect(storeScreenshotBundleProblems(bundle, dir, "current-source").join("\n")).toContain("source manifest is missing");
-    const missingProvenanceProblems = storeScreenshotBundleProblems({
-      ...bundle,
-      storeScreenshotsSource: {
-        schemaVersion: 1,
-        generatedAt: "2026-06-26T12:00:00.000Z",
-        simulatorSourceSha256: "current-source",
-        git: {
-          dirtyContentSha256: "clean",
-          head: "a".repeat(40),
-          statusPorcelain: "",
-          worktreeClean: true,
-        },
-        screenshots: [{
-          file: "01.png",
-          height: 288,
-          sha256: screenshotSha256,
-          sizeBytes: screenshotSize,
-          width: 576,
-        }],
-      },
-    }, dir, "current-source").join("\n");
-    expect(missingProvenanceProblems).toContain("does not confirm official simulator camera capture");
-    expect(missingProvenanceProblems).toContain("does not confirm the no-editing screenshot policy");
-    expect(storeScreenshotBundleProblems({
-      ...bundle,
-      storeScreenshotsSource: {
-        schemaVersion: 1,
-        captureSource: "official-evenhub-simulator-camera",
-        editingPolicy: "none; screenshots are direct simulator captures",
-        generatedAt: "2026-06-26T12:00:00.000Z",
-        simulatorSourceSha256: "old-source",
-        git: {
-          dirtyContentSha256: "clean",
-          head: null,
-          statusPorcelain: "",
-          worktreeClean: true,
-        },
-        screenshots: [{
-          file: "01.png",
-          height: 288,
-          sha256: screenshotSha256,
-          sizeBytes: screenshotSize,
-          width: 576,
-        }],
-      },
-    }, dir, "current-source").join("\n")).toContain("older simulator/UI source");
-    expect(storeScreenshotBundleProblems({
-      ...bundle,
-      storeScreenshotsSource: {
-        schemaVersion: 1,
-        captureSource: "official-evenhub-simulator-camera",
-        editingPolicy: "none; screenshots are direct simulator captures",
-        generatedAt: "2026-06-26T12:00:00.000Z",
-        simulatorSourceSha256: "current-source",
-        git: {
-          dirtyContentSha256: "dirty",
-          head: "a".repeat(40),
-          statusPorcelain: " M src/main.tsx",
-          worktreeClean: false,
-        },
-        screenshots: [{
-          file: "01.png",
-          height: 288,
-          sha256: screenshotSha256,
-          sizeBytes: screenshotSize,
-          width: 576,
-        }],
-      },
-    }, dir, "current-source").join("\n")).toContain("uncommitted changes");
   });
 });
 

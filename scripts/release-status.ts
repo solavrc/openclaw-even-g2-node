@@ -7,10 +7,6 @@ import { dirtyContentSha256, git, porcelainStatusSummary } from "./git-state.ts"
 import { networkReviewMetadata } from "./network-origins.ts";
 import { isSimulatorSourcePath, simulatorSourceSha256 } from "./simulator-source-fingerprint.ts";
 import { errorStack } from "./strict-helpers.ts";
-import {
-  storeScreenshotSourceManifestProblems,
-  type StoreScreenshotSourceManifest,
-} from "./store-screenshot-manifest.ts";
 
 type AppManifest = {
   package_id?: string;
@@ -33,14 +29,6 @@ type BundleManifest = {
     reviewRequired?: boolean;
     reviewRisk?: string | null;
   };
-  storeScreenshots?: Array<{
-    file?: string;
-    height?: number;
-    sha256?: string;
-    sizeBytes?: number;
-    width?: number;
-  }>;
-  storeScreenshotsSource?: StoreScreenshotSourceManifest | null;
   publicReleaseBlockedByNetworkReview?: boolean;
   git?: {
     dirtyContentSha256?: string | null;
@@ -123,12 +111,6 @@ export type ReleaseStatusSummary = {
     dir: string;
     ehpkFile?: string;
     ehpkSha256?: string;
-    screenshotCount: number;
-    screenshotSource: {
-      generatedAt?: string;
-      head?: string | null;
-      worktreeClean?: boolean;
-    } | null;
   } | null;
   blockers: string[];
   privateRehearsalBlockers: string[];
@@ -281,60 +263,6 @@ export function currentPackedBundleWarning({
   return null;
 }
 
-export function storeScreenshotBundleProblems(
-  bundle: BundleManifest | null,
-  bundleDir: string,
-  currentSimulatorSourceSha256?: string,
-) {
-  const screenshots = bundle?.storeScreenshots;
-  if (!Array.isArray(screenshots) || screenshots.length === 0) {
-    return ["release bundle has no Even Hub store screenshots."];
-  }
-  const resolvedBundleDir = path.resolve(bundleDir);
-  const problems: string[] = [];
-  if (screenshots.length > 6) {
-    problems.push(`release bundle has ${screenshots.length} store screenshots; Even Hub accepts at most 6.`);
-  }
-  screenshots.forEach((screenshot, index) => {
-    const label = screenshot.file || `store screenshot #${index + 1}`;
-    if (!screenshot.file) {
-      problems.push(`${label} has no file path.`);
-      return;
-    }
-    const filePath = path.resolve(resolvedBundleDir, screenshot.file);
-    const relativePath = path.relative(resolvedBundleDir, filePath);
-    if (relativePath.startsWith("..") || path.isAbsolute(relativePath) || !fs.existsSync(filePath)) {
-      problems.push(`${label} is missing from the release bundle.`);
-      return;
-    }
-    const sizeBytes = fs.statSync(filePath).size;
-    const sha256 = sha256File(filePath);
-    if (screenshot.sizeBytes !== sizeBytes) {
-      problems.push(`${label} size mismatch: manifest=${screenshot.sizeBytes}, actual=${sizeBytes}.`);
-    }
-    if (screenshot.sha256 !== sha256) {
-      problems.push(`${label} SHA-256 mismatch.`);
-    }
-    if (screenshot.width !== 576 || screenshot.height !== 288) {
-      problems.push(`${label} is ${screenshot.width || "?"}x${screenshot.height || "?"}; expected 576x288.`);
-    }
-  });
-  if (currentSimulatorSourceSha256) {
-    problems.push(...storeScreenshotSourceManifestProblems({
-      manifest: bundle?.storeScreenshotsSource,
-      screenshots: screenshots.map((screenshot) => ({
-        file: path.basename(screenshot.file || ""),
-        height: screenshot.height || 0,
-        sha256: screenshot.sha256 || "",
-        sizeBytes: screenshot.sizeBytes || 0,
-        width: screenshot.width || 0,
-      })),
-      currentSimulatorSourceSha256,
-    }));
-  }
-  return problems;
-}
-
 export function submissionCopyBundleProblems(bundleDir: string) {
   const submissionCopyPath = path.join(bundleDir, "submission-copy.md");
   const reviewInquiryPath = path.join(bundleDir, "review-inquiry.md");
@@ -426,12 +354,6 @@ export function releaseStatusSummary(status: ReleaseStatus): ReleaseStatusSummar
       dir: status.bundleDir,
       ehpkFile: status.bundle.ehpk?.file,
       ehpkSha256: status.bundle.ehpk?.sha256,
-      screenshotCount: status.bundle.storeScreenshots?.length ?? 0,
-      screenshotSource: status.bundle.storeScreenshotsSource ? {
-        generatedAt: status.bundle.storeScreenshotsSource.generatedAt,
-        head: status.bundle.storeScreenshotsSource.git?.head,
-        worktreeClean: status.bundle.storeScreenshotsSource.git?.worktreeClean,
-      } : null,
     } : null,
     blockers: status.blockers,
     privateRehearsalBlockers: status.privateRehearsalBlockers,
@@ -524,9 +446,6 @@ export function main(): void {
     if (!fs.existsSync(path.join(bundleDir, "PRIVACY.md"))) blockPrivate("release bundle PRIVACY.md is missing.");
     for (const submissionCopyProblem of submissionCopyBundleProblems(bundleDir)) {
       blockPrivate(submissionCopyProblem);
-    }
-    for (const screenshotProblem of storeScreenshotBundleProblems(bundle, bundleDir, currentSimulatorSourceSha256)) {
-      blockPrivate(screenshotProblem);
     }
     const bundleGitWarning = releaseBundleGitWarning(bundle, {
       currentHead,
