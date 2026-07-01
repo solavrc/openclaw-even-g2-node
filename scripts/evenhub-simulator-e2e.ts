@@ -6,7 +6,7 @@ import {
   type SimulatorCapture,
 } from "./simulator-utils.js";
 
-type SimFlow = "auto" | "setup" | "session" | "sessionSelector" | "voiceReview" | "canvas" | "canvasTutorial" | "approval" | "recovery" | "storeChat" | "storeVoice" | "sendNow";
+type SimFlow = "auto" | "setup" | "rootExit" | "session" | "sessionSelector" | "voiceReview" | "canvas" | "canvasTutorial" | "approval" | "recovery" | "storeChat" | "storeVoice" | "sendNow";
 
 const BASE_URL = process.env.EVENG2_SIMULATOR_URL || "http://127.0.0.1:9898";
 const OUT_DIR = process.env.EVENG2_SIMULATOR_OUT_DIR || "/tmp";
@@ -16,6 +16,7 @@ const SESSION_LIT_THRESHOLD = 3_500;
 function normalizeFlow(value: string | undefined): SimFlow {
   if (
     value === "setup"
+    || value === "rootExit"
     || value === "session"
     || value === "sessionSelector"
     || value === "voiceReview"
@@ -69,15 +70,35 @@ async function inputAndCapture(action: Parameters<typeof sendSimulatorInput>[1],
   return captureStep(label);
 }
 
-async function waitForConsoleText(pattern: string, timeoutMs: number) {
+async function waitForConsoleText(pattern: string, timeoutMs: number, baseline = "") {
   const deadline = Date.now() + timeoutMs;
   let lastText = "";
   while (Date.now() < deadline) {
     lastText = await simulatorConsoleText(BASE_URL);
-    if (lastText.includes(pattern)) return lastText;
+    const freshText = baseline && lastText.startsWith(baseline)
+      ? lastText.slice(baseline.length)
+      : lastText;
+    if (freshText.includes(pattern)) return freshText;
     await sleep(250);
   }
   throw new Error(`Timed out waiting for simulator console pattern ${pattern}. Last console text:\n${lastText}`);
+}
+
+function parseLastE2eMarker(consoleText: string, marker: string) {
+  const lines = consoleText.split(/\r?\n/);
+  for (let index = lines.length - 1; index >= 0; index -= 1) {
+    const line = lines[index] || "";
+    const markerIndex = line.indexOf(marker);
+    if (markerIndex < 0) continue;
+    const jsonText = line.slice(markerIndex + marker.length).trim();
+    try {
+      const parsed = JSON.parse(jsonText) as unknown;
+      return parsed && typeof parsed === "object" ? parsed as Record<string, unknown> : null;
+    } catch {
+      return null;
+    }
+  }
+  return null;
 }
 
 async function runSetupSmoke(initial: SimulatorCapture) {
@@ -85,6 +106,23 @@ async function runSetupSmoke(initial: SimulatorCapture) {
     flow: "setup",
     steps: [
       stepEvidence("setup", initial),
+    ],
+  };
+}
+
+async function runRootExitSmoke(initial: SimulatorCapture) {
+  const baseline = await simulatorConsoleText(BASE_URL);
+  await sendSimulatorInput(BASE_URL, "double_click");
+  const consoleText = await waitForConsoleText("root-exit-result", 5_000, baseline);
+  const result = parseLastE2eMarker(consoleText, "[openclaw-even-g2-node:e2e:exit]");
+  if (result?.action !== "root-exit-result" || result.exitMode !== 1 || result.ok !== true) {
+    throw new Error(`Expected successful root exit result marker, got ${JSON.stringify(result)}`);
+  }
+  return {
+    flow: "rootExit",
+    steps: [
+      stepEvidence("initial-root", initial),
+      { name: "root-exit-confirmation", action: "double_click" },
     ],
   };
 }
@@ -178,6 +216,8 @@ async function main() {
     ? await runSessionFlow(initial)
     : flow === "sessionSelector"
       ? await runSessionSelectorFlow(initial)
+    : flow === "rootExit"
+      ? await runRootExitSmoke(initial)
     : flow === "setup"
       ? await runSetupSmoke(initial)
       : await runVisualFixtureFlow(initial, flow);

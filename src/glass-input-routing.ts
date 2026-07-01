@@ -38,6 +38,9 @@ export function glassInputRoute(input: {
   status: string;
   view: GlassView;
 }): GlassInputRoute {
+  if (input.view === "sessionHome" && input.action === "doubleClick") {
+    return { action: "request-exit" };
+  }
   if (!input.connected) {
     return input.hasGatewaySetup ? { action: "connect" } : { action: "show-setup-required" };
   }

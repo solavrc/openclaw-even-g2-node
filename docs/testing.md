@@ -113,6 +113,9 @@ pnpm sim:e2e
 and then selects the flow from the current HUD density:
 
 - setup-like HUD: verifies first-run setup visibility;
+- `rootExit` flow: sends `double_click` on the first-run root HUD and waits
+  for the `shutDownPageContainer(1)` result marker used by the native Even Hub
+  exit confirmation flow;
 - session-like HUD: verifies selected-session visibility. Session switching is
   owned by the phone Session selector, not by a glasses session picker.
 - `sessionSelector` flow: with the dev fixture flag below, exercises the phone
@@ -120,10 +123,16 @@ and then selects the flow from the current HUD density:
   the app sent refresh/switch/transcript Gateway requests, then captures the
   switched glasses/phone state.
 
+The `rootExit` flow depends on the app emitting e2e console markers. Start the
+simulator against an app URL that includes `e2eLog=1`, for example
+`http://127.0.0.1:35162/openclaw-even-g2-node/?resetPairing=1&e2eLog=1`.
+`pnpm sim:fixtures` sets this flag automatically for its root-exit smoke.
+
 Force a mode when needed:
 
 ```bash
 EVENG2_SIM_FLOW=setup pnpm sim:e2e
+EVENG2_SIM_FLOW=rootExit pnpm sim:e2e
 EVENG2_SIM_FLOW=session pnpm sim:e2e
 EVENG2_SIM_FLOW=sessionSelector pnpm sim:e2e
 EVENG2_SIM_FLOW=voiceReview pnpm sim:e2e
@@ -233,10 +242,11 @@ pnpm sim:fixtures
 ```
 
 `sim:fixtures` starts and stops the required local app servers and Even Hub
-simulator processes. It builds the app first, then covers setup, session
+simulator processes. It builds the app first, then covers setup, root-page
+double-tap exit, session
 navigation, phone Session selector switching, review-before-send, Send now,
 canvas, approval, and recovery fixture HUDs. For interactive fixture states it
-also drives representative input events: session `up`/`down`, phone selector
+also drives representative input events: root `double_click`, session `up`/`down`, phone selector
 focus/mousedown/change, Review `tap send`, canvas `tap hide`, approval rerender
 and `tap allow`, tutorial skip, and Send now cancellation. It writes
 `.openclaw-even-g2-node/simulator-fixtures-report.json` for local debugging. The

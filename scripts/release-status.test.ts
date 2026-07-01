@@ -426,6 +426,8 @@ describe("release status review risks", () => {
         ],
         storeScreenshotsSource: {
           schemaVersion: 1,
+          captureSource: "official-evenhub-simulator-camera",
+          editingPolicy: "none; screenshots are direct simulator captures",
           generatedAt: "2026-06-26T12:00:00.000Z",
           simulatorSourceSha256: "e".repeat(64),
           git: {
@@ -533,6 +535,8 @@ describe("release status store screenshots", () => {
       }],
       storeScreenshotsSource: {
         schemaVersion: 1,
+        captureSource: "official-evenhub-simulator-camera",
+        editingPolicy: "none; screenshots are direct simulator captures",
         generatedAt: "2026-06-26T12:00:00.000Z",
         simulatorSourceSha256: "current-source",
         git: {
@@ -604,10 +608,35 @@ describe("release status store screenshots", () => {
     };
 
     expect(storeScreenshotBundleProblems(bundle, dir, "current-source").join("\n")).toContain("source manifest is missing");
+    const missingProvenanceProblems = storeScreenshotBundleProblems({
+      ...bundle,
+      storeScreenshotsSource: {
+        schemaVersion: 1,
+        generatedAt: "2026-06-26T12:00:00.000Z",
+        simulatorSourceSha256: "current-source",
+        git: {
+          dirtyContentSha256: "clean",
+          head: "a".repeat(40),
+          statusPorcelain: "",
+          worktreeClean: true,
+        },
+        screenshots: [{
+          file: "01.png",
+          height: 288,
+          sha256: screenshotSha256,
+          sizeBytes: screenshotSize,
+          width: 576,
+        }],
+      },
+    }, dir, "current-source").join("\n");
+    expect(missingProvenanceProblems).toContain("does not confirm official simulator camera capture");
+    expect(missingProvenanceProblems).toContain("does not confirm the no-editing screenshot policy");
     expect(storeScreenshotBundleProblems({
       ...bundle,
       storeScreenshotsSource: {
         schemaVersion: 1,
+        captureSource: "official-evenhub-simulator-camera",
+        editingPolicy: "none; screenshots are direct simulator captures",
         generatedAt: "2026-06-26T12:00:00.000Z",
         simulatorSourceSha256: "old-source",
         git: {
@@ -629,6 +658,8 @@ describe("release status store screenshots", () => {
       ...bundle,
       storeScreenshotsSource: {
         schemaVersion: 1,
+        captureSource: "official-evenhub-simulator-camera",
+        editingPolicy: "none; screenshots are direct simulator captures",
         generatedAt: "2026-06-26T12:00:00.000Z",
         simulatorSourceSha256: "current-source",
         git: {

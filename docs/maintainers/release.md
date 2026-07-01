@@ -187,8 +187,11 @@ Use [user-guide.md](../user-guide.md) as the source of truth for expected user
 flows when selecting screenshot states.
 
 Use the official simulator camera button for store screenshots when possible.
-The generated PNG must represent a screen the app can actually show. Useful
-HUD states:
+The generated PNG must represent a screen the app can actually show. Do not
+manually edit store screenshots; if review asks, confirm that they were captured
+directly from the official Even Hub simulator camera button and that
+`release/evenhub-screenshots/manifest.json` records the PNG hashes. Useful HUD
+states:
 
 ```bash
 pnpm dev -- --host 127.0.0.1 --port 5174 --strictPort

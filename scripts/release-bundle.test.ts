@@ -30,6 +30,8 @@ describe("releaseBundleSummary", () => {
       ],
       storeScreenshotsSource: {
         schemaVersion: 1,
+        captureSource: "official-evenhub-simulator-camera",
+        editingPolicy: "none; screenshots are direct simulator captures",
         generatedAt: "2026-06-26T21:06:46.158Z",
         simulatorSourceSha256: "d".repeat(64),
         git: {

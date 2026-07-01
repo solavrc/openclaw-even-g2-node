@@ -5,6 +5,8 @@ try {
   const manifest = writeStoreScreenshotSourceManifest();
   console.log(JSON.stringify({
     ok: true,
+    captureSource: manifest.captureSource,
+    editingPolicy: manifest.editingPolicy,
     generatedAt: manifest.generatedAt,
     simulatorSourceSha256: manifest.simulatorSourceSha256,
     screenshots: manifest.screenshots.map((screenshot) => screenshot.file),

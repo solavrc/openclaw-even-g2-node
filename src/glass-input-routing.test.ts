@@ -21,6 +21,23 @@ describe("glassInputRoute", () => {
     });
   });
 
+  it("lets the root page request system exit before gateway setup or connection", () => {
+    expect(glassInputRoute({
+      ...baseInput,
+      action: "doubleClick",
+      connected: false,
+      hasGatewaySetup: false,
+      view: "sessionHome",
+    })).toEqual({ action: "request-exit" });
+    expect(glassInputRoute({
+      ...baseInput,
+      action: "doubleClick",
+      connected: false,
+      hasGatewaySetup: true,
+      view: "sessionHome",
+    })).toEqual({ action: "request-exit" });
+  });
+
   it("routes approval actions", () => {
     expect(glassInputRoute({ ...baseInput, view: "approval", action: "click" })).toEqual({ action: "approval-allow" });
     expect(glassInputRoute({ ...baseInput, view: "approval", action: "doubleClick" })).toEqual({ action: "approval-deny" });
