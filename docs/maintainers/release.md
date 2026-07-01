@@ -193,7 +193,8 @@ Version `0.3.0`: <!-- x-release-please-version -->
 ```text
 Initial OpenClaw Node beta.
 
-- Adds Even G2 as an OpenClaw node with device, talk, and canvas capabilities.
+- Adds Even G2 as an OpenClaw node with device, location, talk, and canvas
+  capabilities.
 - Adds selected-session log on the glasses and session selection on the phone.
 - Adds voice input through OpenClaw-owned transcription.
 - Adds approval prompts and text/image canvas display.

@@ -8,19 +8,21 @@ export const OPENCLAW_NODE_COMMANDS = [
   "device.info",
   "device.health",
   "device.permissions",
+  "location.get",
   "talk.ptt.once",
   "canvas.present",
   "canvas.hide",
   "canvas.snapshot",
 ] as const;
 
+export const LOCATION_COMMANDS = ["location.get"] as const;
 export const CANVAS_COMMANDS = ["canvas.present", "canvas.hide", "canvas.snapshot"] as const;
 export const CANVAS_PRESENT_KINDS = ["canvas", "message", "notification"] as const;
 export const CANVAS_TEXT_PAYLOAD_FIELDS = ["title", "text", "markdown", "body", "content", "message", "html"] as const;
 export const CANVAS_IMAGE_PAYLOAD_FIELDS = ["imageDataUrl", "dataUrl", "image", "imageData", "imageBase64", "base64"] as const;
 export const CANVAS_IMAGE_MIME_TYPES = ["image/png", "image/jpeg", "image/webp"] as const;
-export const BRIDGE_REQUIRED_COMMANDS = ["talk.ptt.once", "canvas.present"] as const;
-export type NodeCommandFamily = "device" | "canvas" | "talk" | "unsupported";
+export const BRIDGE_REQUIRED_COMMANDS = ["location.get", "talk.ptt.once", "canvas.present"] as const;
+export type NodeCommandFamily = "device" | "location" | "canvas" | "talk" | "unsupported";
 
 export type NodeCommandError = {
   code: string;
@@ -39,6 +41,7 @@ export function nodeCommandFamily(command: string): NodeCommandFamily {
   if (command === "device.status" || command === "device.info" || command === "device.health" || command === "device.permissions") {
     return "device";
   }
+  if (command === "location.get") return "location";
   if (command === "canvas.present" || command === "canvas.hide" || command === "canvas.snapshot") return "canvas";
   if (command === "talk.ptt.once") return "talk";
   return "unsupported";
@@ -83,6 +86,76 @@ export function canvasImageFailedError(message: string): NodeCommandError {
   return {
     code: "CANVAS_IMAGE_FAILED",
     message,
+  };
+}
+
+export function locationUnsupportedError(): NodeCommandError {
+  return {
+    code: "LOCATION_UNSUPPORTED",
+    message: "This Even Hub runtime does not expose getAppLocation(). Update Even Hub and retry.",
+  };
+}
+
+export function locationUnavailableError(): NodeCommandError {
+  return {
+    code: "LOCATION_UNAVAILABLE",
+    message: "Even Hub did not return a location fix. Location may be unavailable, denied, invalid, or timed out.",
+  };
+}
+
+export function locationFailedError(message: string): NodeCommandError {
+  return {
+    code: "LOCATION_FAILED",
+    message,
+  };
+}
+
+function finiteNumber(value: unknown) {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+type LocationFixLike = {
+  latitude?: unknown;
+  longitude?: unknown;
+  accuracy?: unknown;
+  altitude?: unknown;
+  speed?: unknown;
+  heading?: unknown;
+  timestamp?: unknown;
+};
+
+export function locationGetOptionsFromParams(params: Record<string, unknown> = {}) {
+  const timeoutMs = finiteNumber(params.timeoutMs);
+  if (timeoutMs === null) return {};
+  return {
+    timeoutMs: Math.min(30_000, Math.max(1_000, Math.round(timeoutMs))),
+  };
+}
+
+export function locationGetCommandResult(fix: LocationFixLike | null | undefined) {
+  if (!fix) return null;
+  const latitude = finiteNumber(fix.latitude);
+  const longitude = finiteNumber(fix.longitude);
+  if (latitude === null || longitude === null) return null;
+  const optionalFields = {
+    accuracy: finiteNumber(fix.accuracy),
+    altitude: finiteNumber(fix.altitude),
+    speed: finiteNumber(fix.speed),
+    heading: finiteNumber(fix.heading),
+    timestamp: finiteNumber(fix.timestamp),
+  };
+  return {
+    source: "phone",
+    mode: "one-shot",
+    location: {
+      latitude,
+      longitude,
+      ...(optionalFields.accuracy !== null ? { accuracy: optionalFields.accuracy } : {}),
+      ...(optionalFields.altitude !== null ? { altitude: optionalFields.altitude } : {}),
+      ...(optionalFields.speed !== null ? { speed: optionalFields.speed } : {}),
+      ...(optionalFields.heading !== null ? { heading: optionalFields.heading } : {}),
+      ...(optionalFields.timestamp !== null ? { timestamp: optionalFields.timestamp } : {}),
+    },
   };
 }
 
@@ -144,9 +217,15 @@ export function deviceInfoCommandResult(options: DeviceInfoResultOptions) {
     deviceFamily: "glasses",
     modelIdentifier: "Even G2",
     version: options.version,
-    capabilities: ["device", "talk", "canvas"],
+    capabilities: ["device", "location", "talk", "canvas"],
     commands: OPENCLAW_NODE_COMMANDS,
     device: serializableDeviceInfo(options.deviceInfo),
+    location: {
+      commands: LOCATION_COMMANDS,
+      modes: ["one-shot"],
+      source: "phone",
+      continuous: false,
+    },
     canvas: {
       width: options.canvasWidth,
       height: options.canvasHeight,
@@ -193,6 +272,7 @@ export function devicePermissionsCommandResult(options: DevicePermissionsResultO
     gatewayConnected: options.gatewayConnected,
     permissions: {
       network: "configured-by-even-hub",
+      location: options.bridgeLive ? "on-demand" : "bridge-required",
       microphone: options.bridgeLive ? "on-demand" : "bridge-required",
       camera: options.bridgeLive ? "on-demand" : "bridge-required",
     },

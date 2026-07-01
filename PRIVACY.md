@@ -13,6 +13,7 @@ OpenClaw Node may process:
 - selected OpenClaw session identifiers;
 - text sent to and received from OpenClaw;
 - Even G2 microphone audio while voice input is active;
+- one-shot phone location coordinates when OpenClaw invokes `location.get`;
 - camera frames or decoded QR contents while scanning an OpenClaw setup QR;
 - diagnostic status such as Gateway connection state, node state, and current HUD
   view.
@@ -20,6 +21,8 @@ OpenClaw Node may process:
 ## Data Handling
 
 - The Even Hub app sends data only to the configured OpenClaw Gateway endpoint.
+- Location is requested only for the active `location.get` node command. The app
+  does not start continuous location tracking or keep a local location history.
 - Camera frames are used locally to extract an OpenClaw setup code from a QR
   code. The app does not upload QR camera images to the Gateway or any other
   service.

@@ -38,8 +38,8 @@ The Even Hub client owns:
 
 The client opens two Gateway WebSocket sessions with the same device identity:
 
-- `role: "node"` advertises `device`, `talk`, and `canvas` capabilities and
-  handles `node.invoke` requests.
+- `role: "node"` advertises `device`, `location`, `talk`, and `canvas`
+  capabilities and handles `node.invoke` requests.
 - `role: "operator"` uses the bounded setup-code/operator token path for
   session list, history, chat send/abort, approvals, and selected-session
   voice submission.
@@ -77,25 +77,30 @@ The node advertises:
 - `device.info`
 - `device.permissions`
 - `device.health`
+- `location.get`
 - `talk.ptt.once`
 - `canvas.present`
 - `canvas.hide`
 - `canvas.snapshot`
 
-`talk.ptt.once` and canvas commands require a connected live Even Hub bridge to
-the active glasses app. Phone backgrounding alone does not make the node
-unavailable if the glasses app keeps accepting input. If the live client is
-absent, the command should fail explicitly with `EVEN_G2_BRIDGE_UNAVAILABLE`.
-Do not infer bridge availability only from whether the phone WebView is visible.
+`location.get`, `talk.ptt.once`, and live canvas presentation require a
+connected live Even Hub bridge to the active glasses app. Phone backgrounding
+alone does not make the node unavailable if the glasses app keeps accepting
+input. If the live client is absent, the command should fail explicitly with
+`EVEN_G2_BRIDGE_UNAVAILABLE`. Do not infer bridge availability only from
+whether the phone WebView is visible.
 `device.status` exposes `bridgeLive` as the key bridge-availability signal.
 The status command reaching the app already proves that the Gateway transport
 and JavaScript command handler are alive; `bridgeLive` answers the separate
 question of whether this WebView can still operate the active G2 app.
 When available, `device.status` also includes Even Hub SDK device status
 details such as battery, charging, wearing, in-case, and G2 connection state.
-`device.info` describes the canvas dimensions and accepted `canvas.present`
-payload forms so Gateway-side agents do not need hardcoded Even G2 display
-knowledge for common text, message, notification, and inline-image updates.
+`location.get` is one-shot only and reads the phone location through Even Hub;
+continuous/background location is intentionally not part of the advertised node
+surface. `device.info` describes both the one-shot location contract and the
+canvas dimensions and accepted `canvas.present` payload forms so Gateway-side
+agents do not need hardcoded Even G2 display knowledge for common text,
+message, notification, and inline-image updates.
 
 ## Voice Boundary
 

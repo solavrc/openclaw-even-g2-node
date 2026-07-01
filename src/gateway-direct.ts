@@ -1,6 +1,7 @@
 import * as ed25519 from "@noble/ed25519";
 import { sha256, sha512 } from "@noble/hashes/sha2.js";
 import { APP_VERSION } from "./app-version";
+import { OPENCLAW_NODE_COMMANDS } from "./node-command";
 import { preprocessPcm16Mono } from "./voice-preprocess";
 
 ed25519.hashes.sha512 = sha512;
@@ -1103,8 +1104,8 @@ export class GatewayDirectTransport extends EventTarget {
       ...common,
       role: "node",
       scopes: [],
-      caps: ["device", "talk", "canvas"],
-      commands: ["device.status", "device.info", "device.health", "device.permissions", "talk.ptt.once", "canvas.present", "canvas.hide", "canvas.snapshot"],
+      caps: ["device", "location", "talk", "canvas"],
+      commands: [...OPENCLAW_NODE_COMMANDS],
       permissions: {},
       client: buildEvenG2ClientInfo("node", this.instanceId, clientId),
       onOpen: (_hello, identity) => {
@@ -1126,7 +1127,7 @@ export class GatewayDirectTransport extends EventTarget {
             nodeConnected: true,
             connected: true,
             foreground: { clientCount: 1 },
-            openclaw: { nodeEnabled: true, commands: ["device.status", "device.info", "device.health", "device.permissions", "talk.ptt.once", "canvas.present", "canvas.hide", "canvas.snapshot"], lastError: null },
+            openclaw: { nodeEnabled: true, commands: [...OPENCLAW_NODE_COMMANDS], lastError: null },
           },
         });
         this.connectOperator();

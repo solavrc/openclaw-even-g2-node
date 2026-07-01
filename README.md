@@ -117,8 +117,8 @@ openclaw nodes approve <requestId>
 ```
 
 Node tool approval lets OpenClaw invoke Even G2 commands such as
-`canvas.present`, `device.status`, and `talk.ptt.once`. If the phone still shows
-`Node approval required` after approval, tap `Check again`.
+`canvas.present`, `device.status`, `location.get`, and `talk.ptt.once`. If the
+phone still shows `Node approval required` after approval, tap `Check again`.
 
 Useful requests to give your OpenClaw Agent:
 

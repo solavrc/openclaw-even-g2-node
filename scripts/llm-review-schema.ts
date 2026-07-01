@@ -13,6 +13,7 @@ export const LLM_REVIEW_STORY_IDS = [
   "story-6",
   "story-7",
   "story-8",
+  "story-9",
 ] as const;
 
 export type LlmReviewStoryId = typeof LLM_REVIEW_STORY_IDS[number];
@@ -55,17 +56,20 @@ export const LLM_REVIEW_COVERAGE_IDS = [
   "story-7.1",
   "story-7.2",
   "story-7.3",
-  "story-7.4",
-  "story-7.5",
-  "story-7.6",
   "story-8.1",
   "story-8.2",
   "story-8.3",
   "story-8.4",
   "story-8.5",
   "story-8.6",
-  "story-8.7",
-  "story-8.8",
+  "story-9.1",
+  "story-9.2",
+  "story-9.3",
+  "story-9.4",
+  "story-9.5",
+  "story-9.6",
+  "story-9.7",
+  "story-9.8",
 ] as const;
 
 export type LlmReviewCoverageId = typeof LLM_REVIEW_COVERAGE_IDS[number];

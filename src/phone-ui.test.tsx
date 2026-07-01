@@ -556,7 +556,7 @@ describe("connection guidance", () => {
     const nodeGuidance = guidanceForConnectionState("error: node approval required", true);
     expect(nodeGuidance?.title).toBe("Node approval required");
     expect(nodeGuidance?.body).toContain("node command request");
-    expect(nodeGuidance?.body).toContain("canvas and push-to-talk");
+    expect(nodeGuidance?.body).toContain("canvas, location, and push-to-talk");
     expect(nodeGuidance?.action).toContain("$ openclaw nodes pending");
     expect(nodeGuidance?.action).toContain("Hey Claw, approve remaining Even G2 node tools.");
     expect(nodeGuidance?.action).toContain("solavrc/openclaw-even-g2-node");

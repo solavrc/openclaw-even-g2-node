@@ -17,6 +17,10 @@
       "desc": "Captures Even G2 microphone audio for OpenClaw voice input."
     },
     {
+      "name": "location",
+      "desc": "Reads a one-shot phone location only when OpenClaw invokes the Even G2 node location.get command."
+    },
+    {
       "name": "camera",
       "desc": "Scans the user-owned OpenClaw Gateway setup QR code during initial setup and recovery."
     }

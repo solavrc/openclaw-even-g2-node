@@ -189,6 +189,11 @@ import {
   deviceNodeCommandPayload,
   evenG2BridgeUnavailableError,
   glassRenderFailedError,
+  locationFailedError,
+  locationGetCommandResult,
+  locationGetOptionsFromParams,
+  locationUnavailableError,
+  locationUnsupportedError,
   nodeCommandFamily,
   nodeCommandIdFromMessage,
   nodeCommandNameFromMessage,
@@ -445,6 +450,9 @@ type GlassInputEventAction = NonNullable<ReturnType<typeof glassInputActionFromE
 type EvenHubLifecycleRouteResult = ReturnType<typeof evenHubLifecycleRoute>;
 type SessionTranscriptSnapshotUpdate = ReturnType<typeof sessionTranscriptSnapshotUpdate>;
 type CanvasMessageKind = Extract<CanvasPresentationKind, "message" | "notification">;
+type EvenHubLocationBridge = EvenAppBridge & {
+  getAppLocation?: (options?: { timeoutMs?: number }) => Promise<unknown>;
+};
 
 function talkReviewProviderId(status: TalkCatalogReviewStatus) {
   return "providerId" in status ? status.providerId || "" : "";
@@ -2378,6 +2386,33 @@ export function App() {
     return true;
   }
 
+  async function handleLocationNodeCommand(id: string, command: string, msg: NodeCommandMessage) {
+    if (nodeCommandFamily(command) !== "location") return false;
+    if (!hasForegroundBridge()) {
+      sendNodeCommandResult(id, false, {}, evenG2BridgeUnavailableError());
+      return true;
+    }
+    const bridge = bridgeRef.current as EvenHubLocationBridge | null;
+    if (typeof bridge?.getAppLocation !== "function") {
+      sendNodeCommandResult(id, false, {}, locationUnsupportedError());
+      return true;
+    }
+    try {
+      const fix = await bridge.getAppLocation(locationGetOptionsFromParams(msg.params || {}));
+      const payload = locationGetCommandResult(fix as Parameters<typeof locationGetCommandResult>[0]);
+      if (!payload) {
+        sendNodeCommandResult(id, false, {}, locationUnavailableError());
+        return true;
+      }
+      sendNodeCommandResult(id, true, payload);
+      return true;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      sendNodeCommandResult(id, false, {}, locationFailedError(message));
+      return true;
+    }
+  }
+
   function clearPendingNodeVoiceStopTimer() {
     clearWindowTimeoutRef(pendingNodeVoiceStopTimerRef);
   }
@@ -2588,6 +2623,7 @@ export function App() {
     if (msg.nodeId) mergeActiveNodeSnapshot({ nodeId: msg.nodeId });
     if (!id) return;
     if (handleDeviceNodeCommand(id, command)) return;
+    if (await handleLocationNodeCommand(id, command, msg)) return;
     if (await handleCanvasNodeCommand(id, command, msg)) return;
     if (await handleTalkPttNodeCommand(id, command, msg)) return;
     sendNodeCommandResult(id, false, {}, unsupportedNodeCommandError(command));

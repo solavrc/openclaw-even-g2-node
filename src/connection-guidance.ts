@@ -187,7 +187,7 @@ function operatorApprovalGuidance(requestId: string): ConnectionGuidance {
 export function nodeApprovalGuidance(): ConnectionGuidance {
   return {
     title: "Node approval required",
-    body: "The device and operator are trusted. Approve the node command request so OpenClaw can use Even G2 tools like canvas and push-to-talk.",
+    body: "The device and operator are trusted. Approve the node command request so OpenClaw can use Even G2 tools like canvas, location, and push-to-talk.",
     action: hostCommand("openclaw nodes approve", "openclaw nodes pending", REQUEST_ID_PLACEHOLDER, conversationalApprovalRequest("node")),
   };
 }
