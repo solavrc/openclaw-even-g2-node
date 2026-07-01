@@ -15,6 +15,11 @@ import {
   deviceStatusCommandResult,
   evenG2BridgeUnavailableError,
   glassRenderFailedError,
+  locationFailedError,
+  locationGetCommandResult,
+  locationGetOptionsFromParams,
+  locationUnavailableError,
+  locationUnsupportedError,
   nodeCommandFamily,
   nodeCommandIdFromMessage,
   nodeCommandNameFromMessage,
@@ -77,8 +82,14 @@ describe("deviceInfoCommandResult", () => {
       canvasHeight: 288,
     })).toMatchObject({
       version: "0.1.15",
-      capabilities: ["device", "talk", "canvas"],
+      capabilities: ["device", "location", "talk", "canvas"],
       commands: OPENCLAW_NODE_COMMANDS,
+      location: {
+        commands: ["location.get"],
+        modes: ["one-shot"],
+        source: "phone",
+        continuous: false,
+      },
       canvas: {
         width: 576,
         height: 288,
@@ -120,11 +131,47 @@ describe("devicePermissionsCommandResult", () => {
     })).toMatchObject({
       permissions: {
         network: "configured-by-even-hub",
+        location: "on-demand",
         microphone: "on-demand",
         camera: "on-demand",
       },
-      bridgeRequiredCommands: ["talk.ptt.once", "canvas.present"],
+      bridgeRequiredCommands: ["location.get", "talk.ptt.once", "canvas.present"],
     });
+  });
+});
+
+describe("location command helpers", () => {
+  it("clamps one-shot timeout params", () => {
+    expect(locationGetOptionsFromParams({ timeoutMs: 250 })).toEqual({ timeoutMs: 1000 });
+    expect(locationGetOptionsFromParams({ timeoutMs: 60_000 })).toEqual({ timeoutMs: 30000 });
+    expect(locationGetOptionsFromParams({ timeoutMs: 5432.4 })).toEqual({ timeoutMs: 5432 });
+    expect(locationGetOptionsFromParams({ timeoutMs: "fast" })).toEqual({});
+  });
+
+  it("serializes valid location fixes and rejects missing coordinates", () => {
+    expect(locationGetCommandResult({
+      latitude: 35.681236,
+      longitude: 139.767125,
+      accuracy: 12.5,
+      altitude: null,
+      speed: 0,
+      heading: 91,
+      timestamp: 1767225600000,
+    })).toEqual({
+      source: "phone",
+      mode: "one-shot",
+      location: {
+        latitude: 35.681236,
+        longitude: 139.767125,
+        accuracy: 12.5,
+        speed: 0,
+        heading: 91,
+        timestamp: 1767225600000,
+      },
+    });
+    expect(locationGetCommandResult(null)).toBeNull();
+    expect(locationGetCommandResult({ latitude: 35.681236 })).toBeNull();
+    expect(locationGetCommandResult({ latitude: Number.NaN, longitude: 139.767125 })).toBeNull();
   });
 });
 
@@ -175,6 +222,7 @@ describe("node command message helpers", () => {
   it("classifies node commands by handling surface", () => {
     expect(nodeCommandFamily("device.status")).toBe("device");
     expect(nodeCommandFamily("device.permissions")).toBe("device");
+    expect(nodeCommandFamily("location.get")).toBe("location");
     expect(nodeCommandFamily("canvas.present")).toBe("canvas");
     expect(nodeCommandFamily("talk.ptt.once")).toBe("talk");
     expect(nodeCommandFamily("display.message")).toBe("unsupported");
@@ -202,6 +250,16 @@ describe("node command message helpers", () => {
     expect(canvasImageFailedError("bad image")).toEqual({
       code: "CANVAS_IMAGE_FAILED",
       message: "bad image",
+    });
+    expect(locationUnsupportedError()).toMatchObject({
+      code: "LOCATION_UNSUPPORTED",
+    });
+    expect(locationUnavailableError()).toMatchObject({
+      code: "LOCATION_UNAVAILABLE",
+    });
+    expect(locationFailedError("permission denied")).toEqual({
+      code: "LOCATION_FAILED",
+      message: "permission denied",
     });
     expect(unsupportedNodeCommandError("display.message")).toEqual({
       code: "COMMAND_NOT_SUPPORTED",

@@ -20,11 +20,11 @@ describe("LLM review schema", () => {
 
   it("requires all story ids exactly once", () => {
     const review = createLlmReviewTemplate();
-    review.storyReviews = review.storyReviews.filter((story) => story.storyId !== "story-8");
+    review.storyReviews = review.storyReviews.filter((story) => story.storyId !== "story-9");
 
     expect(validateLlmReview(review)).toEqual(expect.arrayContaining([
-      "storyReviews must contain exactly 8 entries.",
-      "storyReviews is missing story-8.",
+      "storyReviews must contain exactly 9 entries.",
+      "storyReviews is missing story-9.",
     ]));
   });
 
@@ -42,11 +42,11 @@ describe("LLM review schema", () => {
 
   it("requires all coverage ids exactly once", () => {
     const review = createLlmReviewTemplate();
-    review.coverageReviews = review.coverageReviews.filter((coverage) => coverage.coverageId !== "story-8.8");
+    review.coverageReviews = review.coverageReviews.filter((coverage) => coverage.coverageId !== "story-9.8");
 
     expect(validateLlmReview(review)).toEqual(expect.arrayContaining([
-      "coverageReviews must contain exactly 48 entries.",
-      "coverageReviews is missing story-8.8.",
+      "coverageReviews must contain exactly 51 entries.",
+      "coverageReviews is missing story-9.8.",
     ]));
   });
 

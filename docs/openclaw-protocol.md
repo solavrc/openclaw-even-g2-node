@@ -17,7 +17,7 @@ Use the highest-level OpenClaw surface that matches the user experience:
 - Use `tools.media.audio` indirectly through `chat.send` attachments when the
   selected Agent should decide how to understand an audio file.
 - Use node capabilities only for live G2 bridge features such as HUD rendering,
-  canvas presentation, and push-to-talk.
+  canvas presentation, one-shot location, and push-to-talk.
 
 Do not place provider keys, provider model choices, or billing decisions in the
 Even Hub package. Those belong to OpenClaw Gateway.
@@ -260,10 +260,41 @@ The glasses display is 576x288. The app scales image canvas payloads to fit
 that display and sends the result to Even Hub as tiled image containers.
 
 `device.info` returns the advertised commands plus the canvas dimensions,
-accepted `canvas.present` kinds, supported text/image payload fields, and the
-latest Even Hub device information when available. `device.status` returns the
-Gateway/app state plus the latest Even Hub device status such as battery,
-charging, wearing, in-case, and connection state when the SDK has reported it.
+accepted `canvas.present` kinds, supported text/image payload fields, one-shot
+location contract, and the latest Even Hub device information when available.
+`device.status` returns the Gateway/app state plus the latest Even Hub device
+status such as battery, charging, wearing, in-case, and connection state when
+the SDK has reported it.
+
+## One-Shot Location
+
+The node advertises `location.get` for a single phone location fix through the
+Even Hub bridge. It calls Even Hub `getAppLocation()` and returns a payload like:
+
+```json
+{
+  "source": "phone",
+  "mode": "one-shot",
+  "location": {
+    "latitude": 35.681236,
+    "longitude": 139.767125,
+    "accuracy": 12.5,
+    "timestamp": 1767225600000
+  }
+}
+```
+
+Only `latitude` and `longitude` are required in a successful result. Accuracy,
+altitude, speed, heading, and timestamp are included when Even Hub returns
+finite numeric values.
+
+`location.get` requires the live Even Hub bridge and the app's `location`
+permission. It does not start continuous tracking and does not subscribe to
+background location updates. When the SDK does not expose `getAppLocation()`,
+the app returns `LOCATION_UNSUPPORTED`; when Even Hub returns no usable fix, it
+returns `LOCATION_UNAVAILABLE`.
+
+## Live Bridge Constraints
 
 Even G2 display APIs live in the Even Hub bridge for the active glasses app.
 The phone page being hidden or the Even app being in the OS background is not by

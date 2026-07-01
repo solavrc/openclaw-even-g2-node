@@ -13,15 +13,21 @@ Useful public APIs:
 - `updateImageRawData`
 - `textContainerUpgrade`
 - `audioControl`
+- `getAppLocation`
 - `onEvenHubEvent`
 
-The public SDK exposes page container rendering, G2 microphone PCM capture, IMU
-control, local storage, device info, and event callbacks. It does not expose a
-documented real-device framebuffer screenshot API, built-in transcription API,
-Android `SpeechRecognizer` bridge, Web Speech API bridge, or native handler
-registration mechanism for `.ehpk` packages. It also does not expose a
-documented QR/barcode scanner API; the camera API is a single-image capture
-flow through `captureImageFromCamera()`.
+The public SDK exposes page container rendering, G2 microphone PCM capture,
+one-shot phone location, IMU control, local storage, device info, and event
+callbacks. It does not expose a documented real-device framebuffer screenshot
+API, built-in transcription API, Android `SpeechRecognizer` bridge, Web Speech
+API bridge, or native handler registration mechanism for `.ehpk` packages. It
+also does not expose a documented QR/barcode scanner API; the camera API is a
+single-image capture flow through `captureImageFromCamera()`.
+
+`getAppLocation()` reads from the phone location services and requires the
+`location` app permission. This repo exposes only the one-shot `location.get`
+node command for now; it does not call continuous location update APIs or keep a
+background location subscription.
 
 Only one event-capturing container should be active on a page. Create the
 startup page container before microphone or IMU use.

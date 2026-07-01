@@ -500,9 +500,9 @@ review evidence:
 pnpm e2e:agent:review:validate -- .openclaw-even-g2-node/e2e-agent-runs/<run-id>
 ```
 
-The validator requires exactly one review for each `story-1` through `story-8`,
+The validator requires exactly one review for each `story-1` through `story-9`,
 exactly one coverage entry for each numbered substory such as `story-1.1` and
-`story-8.8`, confidence values from `0` to `1`, string arrays for
+`story-9.8`, confidence values from `0` to `1`, string arrays for
 evidence/concerns/fixes, and one of `pass`, `warn`, `fail`, or `inconclusive`
 for every verdict. Coverage entries use `observed`, `partial`, `unobserved`, or
 `not-applicable`. Use `warn` when observed behavior looks aligned but the

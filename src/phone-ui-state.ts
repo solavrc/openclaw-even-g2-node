@@ -193,7 +193,7 @@ export function readinessChecklist(input: {
       : { label: "Device/operator approval", status: "Waiting", detail: "Gateway must connect before this can be confirmed.", tone: "pending" };
 
   const nodeTools: ReadinessChecklistItem = input.nodeApprovalPending
-    ? { label: "Node tools approval", status: "Pending", detail: "Approve Even G2 node tools so canvas and push-to-talk can run.", tone: "attention" }
+    ? { label: "Node tools approval", status: "Pending", detail: "Approve Even G2 node tools so canvas, location, and push-to-talk can run.", tone: "attention" }
     : input.connected && input.nodeConnected
       ? { label: "Node tools approval", status: "Ready", detail: "OpenClaw can route Even G2 node commands.", tone: "ready" }
       : { label: "Node tools approval", status: "Waiting", detail: "Connect Gateway and finish node approval if OpenClaw asks.", tone: "pending" };
@@ -203,9 +203,9 @@ export function readinessChecklist(input: {
     : { label: "Selected session", status: "Waiting", detail: "The first glasses view appears after the operator session connects.", tone: "pending" };
 
   const bridge: ReadinessChecklistItem = input.connected && input.nodeConnected && input.foregroundClientCount > 0
-    ? { label: "G2 bridge", status: "Live", detail: "Canvas, glasses input, and push-to-talk can use the active glasses app.", tone: "ready" }
+    ? { label: "G2 bridge", status: "Live", detail: "Canvas, location, glasses input, and push-to-talk can use the active glasses app.", tone: "ready" }
     : input.connected && input.nodeConnected
-      ? { label: "G2 bridge", status: "Unavailable", detail: "Open OpenClaw Node on the glasses for canvas and push-to-talk.", tone: "attention" }
+      ? { label: "G2 bridge", status: "Unavailable", detail: "Open OpenClaw Node on the glasses for canvas, location, and push-to-talk.", tone: "attention" }
       : { label: "G2 bridge", status: "Waiting", detail: "Bridge state is confirmed after the node session connects.", tone: "pending" };
 
   const canvasTutorial: ReadinessChecklistItem | null = input.showCanvasTutorial

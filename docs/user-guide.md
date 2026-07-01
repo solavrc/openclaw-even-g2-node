@@ -47,9 +47,10 @@ The first run has three phases:
 6. Approve the pending `Even G2` node commands when Gateway reports a pending
    node approval: `openclaw nodes pending`, then
    `openclaw nodes approve <requestId>`. This lets OpenClaw invoke node tools
-   such as `canvas.present` and `talk.ptt.once`. It is not always surfaced as
-   a WebSocket connection error, and the app intentionally does not display a
-   concrete node approval request ID. Use `openclaw nodes pending` or
+   such as `canvas.present`, `location.get`, and `talk.ptt.once`. It is not
+   always surfaced as a WebSocket connection error, and the app intentionally
+   does not display a concrete node approval request ID. Use
+   `openclaw nodes pending` or
    `openclaw nodes describe --node "Even G2" --json` on the OpenClaw host when
    canvas or other node commands are unavailable.
 7. Use the selected OpenClaw session on the glasses. Choose a different session
@@ -89,7 +90,7 @@ The onboarding flow is condition-based:
 | Setup required | No Gateway setup code is stored on this phone. | Ask OpenClaw for the Even G2 setup QR, or run `openclaw qr`, then scan it. |
 | Device approval required | The setup QR was scanned, but Gateway has not yet trusted the Even G2 device/node identity. This usually appears as a device pairing request. | Approve the Even G2 device request with `openclaw devices list` and `openclaw devices approve <requestId>`, or ask OpenClaw to approve the pending Even G2 setup. |
 | Operator approval required | The device/node identity is trusted, but the bounded operator token is not yet approved. This can appear as a role-upgrade or higher-role request. | Approve the second Even G2 device request. This is the request that lets the phone read sessions and send voice input. If OpenClaw can see multiple pending Even G2 requests, it may approve them in one pass. |
-| Node approval required | The device and operator can be connected, but Gateway still has a pending node command approval. The concrete request ID is intentionally not read from the phone app; find it through `openclaw nodes pending`, `openclaw nodes describe`, or OpenClaw Agent on the host. | Approve the Even G2 node request so OpenClaw can invoke commands such as `canvas.present`, `device.status`, and `talk.ptt.once`. If OpenClaw can see the full pending state, it may approve remaining Even G2 device/operator/node requests together. |
+| Node approval required | The device and operator can be connected, but Gateway still has a pending node command approval. The concrete request ID is intentionally not read from the phone app; find it through `openclaw nodes pending`, `openclaw nodes describe`, or OpenClaw Agent on the host. | Approve the Even G2 node request so OpenClaw can invoke commands such as `canvas.present`, `device.status`, `location.get`, and `talk.ptt.once`. If OpenClaw can see the full pending state, it may approve remaining Even G2 device/operator/node requests together. |
 | Canvas tutorial | Node command approval just became available and the canvas tutorial has not completed yet. | Ask OpenClaw to create a tiny visual surprise for the Even G2 glasses. The tutorial completes when the app receives a real `canvas.present` command. Tap on the glasses skips it. |
 | Origin blocked | The phone reached Gateway, but the WebView Origin is not allowed by `gateway.controlUi.allowedOrigins`. | Add the App origin shown on the phone to Gateway config, restart or reload Gateway if needed, then tap `Retry now`. |
 | Gateway unreachable | The setup code was accepted, but this phone could not complete the Gateway WebSocket connection. | Confirm the Gateway URL is reachable from this phone network. Use a secure WSS route for remote access; plain WS should be local development only. |
@@ -315,6 +316,18 @@ cancels or closes any active OpenClaw voice transport according to whether the
 capture was still in progress or already being finalized.
 
 OpenClaw can also start push-to-talk capture through the live `Even G2` bridge.
+
+## Location
+
+OpenClaw can request a one-shot phone location fix through the `Even G2` node
+with `location.get`. The command uses the Even Hub bridge and the host phone's
+location services; it does not use a glasses-side GPS sensor and does not start
+continuous background tracking.
+
+`location.get` requires the Even Hub `location` permission and a live bridge.
+If the user denies permission, the phone has no fix before timeout, or the
+runtime does not expose the location API, OpenClaw receives an explicit node
+command error instead of stale cached coordinates.
 
 ## Background And Lock Behavior
 

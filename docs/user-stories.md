@@ -667,13 +667,73 @@ Expected behavior:
 Success condition: OpenClaw can treat Even G2 as a real node capability with
 clear success, snapshot, and failure semantics.
 
-## Story 7: Handle Approvals On The Glasses
+## Story 7: Share One-Shot Location
+
+OpenClaw can ask the Even G2 node for a current, one-shot phone location fix
+when location context is useful. The app should expose this as a bounded node
+capability, not as continuous tracking.
+
+### 7.1 Advertise the one-shot location contract
+
+OpenClaw agents should be able to discover that location is available without
+assuming Android-companion or glasses-camera/GPS behavior.
+
+Expected behavior:
+
+- `device.info` advertises `location.get`;
+- `device.info.capabilities` includes `location`;
+- the location contract says the source is the phone and the mode is
+  `one-shot`;
+- no continuous location commands or background subscription commands are
+  advertised.
+
+Success condition: OpenClaw can discover that Even G2 supports bounded
+location context without assuming it is a full mobile companion node.
+
+### 7.2 Return a current phone location fix
+
+When OpenClaw invokes `location.get`, the app asks Even Hub for one current
+phone location fix.
+
+Expected behavior:
+
+- the app calls Even Hub `getAppLocation()` only for the active command;
+- the result includes `source: "phone"` and `mode: "one-shot"`;
+- successful results include finite `latitude` and `longitude`;
+- optional numeric fields such as accuracy, altitude, speed, heading, and
+  timestamp are included only when Even Hub returns them;
+- the app does not cache coordinates as a fallback result.
+
+Success condition: OpenClaw receives fresh location context or a clear command
+failure, never stale hidden state.
+
+### 7.3 Fail clearly when location is unavailable
+
+Location depends on the live Even Hub bridge, the host phone, runtime API
+support, and user permission.
+
+Expected behavior:
+
+- if no live glasses bridge/client is present, OpenClaw receives
+  `EVEN_G2_BRIDGE_UNAVAILABLE`;
+- if the runtime does not expose `getAppLocation()`, OpenClaw receives
+  `LOCATION_UNSUPPORTED`;
+- if Even Hub returns no usable fix, OpenClaw receives
+  `LOCATION_UNAVAILABLE`;
+- thrown SDK/runtime errors are returned as `LOCATION_FAILED`;
+- the app does not start continuous location updates to repair a one-shot
+  failure.
+
+Success condition: location failures are explicit and do not silently degrade
+into a long-running tracker.
+
+## Story 8: Handle Approvals On The Glasses
 
 When OpenClaw requests approval during a workflow, the glasses show the request
 summary and choices. The user can decide inside the glasses-first flow instead
 of switching to a phone chat surface.
 
-### 7.1 Receive a workflow approval request
+### 8.1 Receive a workflow approval request
 
 The app listens for Gateway approval request events from the bounded operator
 connection.
@@ -689,7 +749,7 @@ Expected behavior:
 Success condition: a workflow approval request becomes visible on the glasses
 without requiring the user to inspect the phone first.
 
-### 7.2 Show a compact approval summary
+### 8.2 Show a compact approval summary
 
 The glasses show one approval request at a time with compact, state-oriented
 copy.
@@ -706,7 +766,7 @@ Expected behavior:
 Success condition: the user can understand what OpenClaw is asking to do and
 which glasses actions are available.
 
-### 7.3 Resolve from glasses input
+### 8.3 Resolve from glasses input
 
 The primary decision path is on the glasses.
 
@@ -722,7 +782,7 @@ Expected behavior:
 Success condition: the user can approve or reject the request without taking
 out the phone.
 
-### 7.4 Wait for Gateway acknowledgement
+### 8.4 Wait for Gateway acknowledgement
 
 After the user makes a decision, the glasses acknowledge the local action and
 wait for Gateway to confirm or resolve the request.
@@ -743,7 +803,7 @@ Expected behavior:
 Success condition: the glasses do not pretend the request completed until
 Gateway confirms the matching approval event.
 
-### 7.5 Keep the phone as recovery, not the normal approval loop
+### 8.5 Keep the phone as recovery, not the normal approval loop
 
 The phone may show pending approval controls for recovery, but it should not
 become the default approval workflow.
@@ -760,7 +820,7 @@ Expected behavior:
 Success condition: the user has a recovery path without moving normal approvals
 off the glasses.
 
-### 7.6 Keep setup approvals separate
+### 8.6 Keep setup approvals separate
 
 Device pairing, operator setup, and node capability approvals can happen during
 setup, but they are not the same as an in-session workflow approval request.
@@ -779,13 +839,13 @@ workflow-level approval prompts.
 Success condition: approvals are integrated into the glasses-first OpenClaw
 loop.
 
-## Story 8: Recover From Pairing And Gateway Errors
+## Story 9: Recover From Pairing And Gateway Errors
 
 When setup, Gateway connection, or pairing state fails, the app should help the
 user distinguish where the failure is. The phone is the recovery and
 diagnostics surface; the glasses keep short state-oriented guidance.
 
-### 8.1 Show setup-required recovery before pairing exists
+### 9.1 Show setup-required recovery before pairing exists
 
 If no Gateway setup URL is stored, the app stays in setup mode rather than
 trying to reconnect.
@@ -801,7 +861,7 @@ Expected behavior:
 Success condition: the user knows they need a setup QR before any Gateway
 recovery can happen.
 
-### 8.2 Distinguish Gateway unreachable, origin blocks, and Even Hub network blocks
+### 9.2 Distinguish Gateway unreachable, origin blocks, and Even Hub network blocks
 
 If a setup URL exists but the WebSocket connection does not complete, the app
 separates the likely recovery path instead of treating every failure as stale
@@ -827,7 +887,7 @@ Expected behavior:
 Success condition: the user can tell that the app has a setup URL but cannot
 complete the Gateway connection.
 
-### 8.3 Explain origin allowlist failures
+### 9.3 Explain origin allowlist failures
 
 If Gateway rejects the Even Hub WebView origin, the phone reached OpenClaw but
 server-side origin policy blocked the app.
@@ -846,7 +906,7 @@ Expected behavior:
 Success condition: the user can fix the Gateway origin allowlist without
 mistaking it for device pairing failure.
 
-### 8.4 Explain setup approval failures
+### 9.4 Explain setup approval failures
 
 Some failures mean Gateway was reached but trust is incomplete.
 
@@ -868,7 +928,7 @@ Expected behavior:
 Success condition: the user can approve the right setup, operator, or node
 request without guessing which trust layer is blocking progress.
 
-### 8.5 Pause after repeated authentication failures
+### 9.5 Pause after repeated authentication failures
 
 For `too many failed authentication attempts`, the app explains that Gateway
 was reached but repeated authentication failed and retries are temporarily
@@ -887,7 +947,7 @@ Expected behavior:
 Success condition: the user understands that Gateway is reachable, but auth is
 blocked or rate-limited until approvals or pairing state are corrected.
 
-### 8.6 Retry Or Check Deliberately
+### 9.6 Retry Or Check Deliberately
 
 When setup exists, the phone status surface offers a deliberate recovery action
 that matches the current state.
@@ -908,7 +968,7 @@ Expected behavior:
 Success condition: the user can retry after fixing Gateway state, or check
 again after approving node tools, without losing setup.
 
-### 8.7 Set up again when pairing is stale
+### 9.7 Set up again when pairing is stale
 
 If local pairing is stale, the user can clear app-side state before scanning a
 fresh setup QR.
@@ -927,7 +987,7 @@ Expected behavior:
 Success condition: the user can escape stale pairing without hidden leftover
 state in the phone app.
 
-### 8.8 Keep diagnostics available without becoming a chat client
+### 9.8 Keep diagnostics available without becoming a chat client
 
 Recovery should expose enough detail for troubleshooting while preserving the
 product boundary.
@@ -964,9 +1024,11 @@ For local review or agentic E2E, verify each story at the behavior boundary:
   attachment, and Gateway-owned provider setup.
 - Story 6: canvas contract discovery, first-run tutorial, text/image/message
   presentation, hide/snapshot, and live-bridge failure semantics.
-- Story 7: runtime approval prompt, glasses allow/deny, matching ack/resolved
+- Story 7: one-shot location discovery, successful phone fix, and clear
+  unsupported/unavailable/failure semantics.
+- Story 8: runtime approval prompt, glasses allow/deny, matching ack/resolved
   handling, and separation from setup approvals.
-- Story 8: setup-required, network/origin, approval, authentication-pause,
+- Story 9: setup-required, network/origin, approval, authentication-pause,
   retry, setup-again, and diagnostics recovery states.
 - Evidence: simulator or live screenshots are nonblank and readable; real G2 or
   private/beta builds cover microphone, permissions, packaged networking, and

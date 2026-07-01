@@ -102,7 +102,7 @@ describe("NodeLiveStatusPanel", () => {
         readinessItems={[{
           label: "Node tools approval",
           status: "Pending",
-          detail: "Approve Even G2 node tools so canvas and push-to-talk can run.",
+          detail: "Approve Even G2 node tools so canvas, location, and push-to-talk can run.",
           tone: "attention",
         }]}
         setupScanStatus=""
